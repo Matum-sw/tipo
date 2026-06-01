@@ -7,7 +7,6 @@ from PySide6.QtCore import QDate, QTimer, Qt, QUrl, QSize
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
-    QDateEdit,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -29,11 +28,12 @@ from PySide6.QtWidgets import (
 from core.openai_feedback import AIFeedbackService
 from core.paths import ROOT_DIR
 from core.reporting import build_markdown_report, save_markdown_report
+from ui.date_dialog import DateDialog
 from ui.subject_dialog import SubjectDialog
 from ui.widgets import Card, Pill, TimeBlockButton, TimeGridWidget, TimelineHeader
 
 
-HOURS = list(range(4, 25))
+HOURS = list(range(24))
 MINUTES = (0, 10, 20, 30, 40, 50)
 POMODORO_FOCUS_SECONDS = 25 * 60
 POMODORO_BREAK_SECONDS = 5 * 60
@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         self.pomodoro_history = []
         self.tick = QTimer(self)
         self.tick.timeout.connect(self.update_timer)
+        self.current_time_scroll_timer = QTimer(self)
+        self.current_time_scroll_timer.timeout.connect(self.center_current_time_in_plan)
+        self.current_time_scroll_timer.start(60_000)
         self.alarm = QSoundEffect(self)
         self.alarm.setVolume(0.8)
         if ALARM_FILE.exists():
@@ -83,12 +86,11 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(34, 24, 34, 30)
         root.setSpacing(18)
 
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.date_edit.setDate(QDate.currentDate())
-        self.date_edit.setMinimumWidth(148)
-        self.date_edit.dateChanged.connect(self.change_date)
+        self.date_button = QPushButton()
+        self.date_button.setObjectName("DateButton")
+        self.date_button.setMinimumWidth(148)
+        self.date_button.clicked.connect(self.open_date_dialog)
+        self.update_date_button()
 
         board = QHBoxLayout()
         board.setSpacing(22)
@@ -124,7 +126,7 @@ class MainWindow(QMainWindow):
         subject_button.clicked.connect(self.open_subjects)
         subject_button.setObjectName("GhostButton")
 
-        controls_layout.addWidget(self.date_edit, 1)
+        controls_layout.addWidget(self.date_button, 1)
         controls_layout.addWidget(subject_button, 1)
         parent.addWidget(controls)
 
@@ -188,11 +190,11 @@ class MainWindow(QMainWindow):
         plan_actions.addWidget(self.delete_block_button)
         card.layout.addLayout(plan_actions)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setObjectName("PlanScroll")
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.plan_scroll = QScrollArea()
+        self.plan_scroll.setWidgetResizable(True)
+        self.plan_scroll.setObjectName("PlanScroll")
+        self.plan_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.plan_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.time_grid_widget = TimeGridWidget(lambda: self.day)
         self.time_grid_widget.setObjectName("TimeGrid")
@@ -206,7 +208,7 @@ class MainWindow(QMainWindow):
         self.time_grid.addWidget(TimelineHeader(), 0, 1, 1, len(MINUTES))
 
         for row, hour in enumerate(HOURS, start=1):
-            hour_label = QLabel(str(hour))
+            hour_label = QLabel(f"{hour:02d}")
             hour_label.setObjectName("HourLabel")
             hour_label.setAlignment(Qt.AlignCenter)
             self.time_grid.addWidget(hour_label, row, 0)
@@ -234,9 +236,10 @@ class MainWindow(QMainWindow):
         for row in range(1, len(HOURS) + 1):
             self.time_grid.setRowStretch(row, 1)
 
-        scroll.setWidget(self.time_grid_widget)
+        self.plan_scroll.setWidget(self.time_grid_widget)
         self.time_grid_widget.set_block_buttons(self.block_buttons)
-        card.layout.addWidget(scroll, 1)
+        card.layout.addWidget(self.plan_scroll, 1)
+        QTimer.singleShot(0, self.center_current_time_in_plan)
 
     def build_timer_card(self, parent) -> None:
         card = Card("Timer")
@@ -456,8 +459,6 @@ class MainWindow(QMainWindow):
 
     def current_running_task(self) -> tuple[str | None, int | None]:
         now = datetime.now()
-        if now.hour not in HOURS:
-            return None, None
         block_key = f"{now.hour:02d}:{(now.minute // 10) * 10:02d}"
         return block_key, self.store.blocks_for_day(self.day).get(block_key)
 
@@ -621,6 +622,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, "time_grid_widget"):
             self.time_grid_widget.set_timer_segments(self.active_timer_segments())
 
+    def center_current_time_in_plan(self) -> None:
+        if self.day != datetime.now().date().isoformat() or not hasattr(self, "plan_scroll"):
+            return
+
+        now = datetime.now()
+        block = self.block_buttons.get(f"{now.hour:02d}:{(now.minute // 10) * 10:02d}")
+        if not block:
+            return
+
+        scroll_bar = self.plan_scroll.verticalScrollBar()
+        viewport_height = self.plan_scroll.viewport().height()
+        target = block.y() + (block.height() // 2) - (viewport_height // 2)
+        target = max(scroll_bar.minimum(), min(target, scroll_bar.maximum()))
+        scroll_bar.setValue(target)
+
     def cancel_timer_session(self) -> None:
         if not self.running:
             return
@@ -666,8 +682,18 @@ class MainWindow(QMainWindow):
         self.day = qdate.toString("yyyy-MM-dd")
         self.selected_todo_id = None
         self.pomodoro_history = []
+        self.update_date_button()
         self.set_selected_block(None)
         self.refresh_all()
+
+    def open_date_dialog(self) -> None:
+        dialog = DateDialog(QDate.fromString(self.day, "yyyy-MM-dd"), self)
+        if dialog.exec() == DateDialog.Accepted:
+            self.change_date(dialog.selected_date())
+
+    def update_date_button(self) -> None:
+        if hasattr(self, "date_button"):
+            self.date_button.setText(QDate.fromString(self.day, "yyyy-MM-dd").toString("yyyy-MM-dd"))
 
     def open_subjects(self) -> None:
         SubjectDialog(self.store, self).exec()
@@ -679,6 +705,7 @@ class MainWindow(QMainWindow):
         self.refresh_brain_dump()
         self.refresh_blocks()
         self.refresh_stats()
+        QTimer.singleShot(0, self.center_current_time_in_plan)
 
     def refresh_subjects(self) -> None:
         subjects = self.store.subjects(include_other=True)

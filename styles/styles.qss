@@ -35,6 +35,12 @@
   background: transparent;
 }
 
+#DateButton {
+  background: #ffffff;
+  border: 1px solid #dde6f4;
+  color: #2c3950;
+}
+
 #DialogTitle {
   font-size: 26px;
   font-weight: 800;
@@ -44,7 +50,6 @@
 QLineEdit,
 QTextEdit,
 QComboBox,
-QDateEdit,
 QListWidget {
   background: #ffffff;
   border: 1px solid #e3e9f4;
@@ -54,18 +59,15 @@ QListWidget {
 }
 
 QLineEdit,
-QComboBox,
-QDateEdit {
+QComboBox {
   min-height: 42px;
 }
 
-QComboBox,
-QDateEdit {
+QComboBox {
   padding-right: 38px;
 }
 
-QComboBox::drop-down,
-QDateEdit::drop-down {
+QComboBox::drop-down {
   width: 32px;
   border: none;
   border-top-right-radius: 16px;
@@ -73,8 +75,7 @@ QDateEdit::drop-down {
   background: #f4f8ff;
 }
 
-QComboBox::down-arrow,
-QDateEdit::down-arrow {
+QComboBox::down-arrow {
   width: 0;
   height: 0;
   image: none;
@@ -107,8 +108,7 @@ QTextEdit {
 
 QLineEdit:focus,
 QTextEdit:focus,
-QComboBox:focus,
-QDateEdit:focus {
+QComboBox:focus {
   border: 1px solid #4e8df7;
 }
 
@@ -368,4 +368,39 @@ QScrollBar:horizontal {
 
 #SubjectDialog {
   background: #f7faff;
+}
+
+#DateDialog {
+  background: #f7faff;
+}
+
+#DateCalendar {
+  background: #ffffff;
+  border: 1px solid #dce8fb;
+  border-radius: 16px;
+  padding: 10px;
+}
+
+#DateCalendar QToolButton {
+  background: #eef4ff;
+  color: #2f68d7;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-weight: 800;
+}
+
+#DateCalendar QMenu {
+  background: #ffffff;
+}
+
+#DateCalendar QSpinBox {
+  background: #ffffff;
+  border: 1px solid #dce8fb;
+  border-radius: 10px;
+  padding: 4px 8px;
+}
+
+#DateCalendar QAbstractItemView {
+  selection-background-color: #3f7df1;
+  selection-color: #ffffff;
 }
