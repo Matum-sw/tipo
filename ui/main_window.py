@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
         self.time_grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.time_grid = QGridLayout(self.time_grid_widget)
         self.time_grid.setHorizontalSpacing(0)
-        self.time_grid.setVerticalSpacing(8)
+        self.time_grid.setVerticalSpacing(0)
         self.time_grid.setContentsMargins(4, 4, 4, 4)
 
         self.time_grid.addWidget(QLabel(""), 0, 0)
@@ -210,7 +210,7 @@ class MainWindow(QMainWindow):
         for row, hour in enumerate(HOURS, start=1):
             hour_label = QLabel(f"{hour:02d}")
             hour_label.setObjectName("HourLabel")
-            hour_label.setAlignment(Qt.AlignCenter)
+            hour_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
             self.time_grid.addWidget(hour_label, row, 0)
             for column, minute in enumerate(MINUTES, start=1):
                 key = f"{hour:02d}:{minute:02d}"
@@ -228,6 +228,11 @@ class MainWindow(QMainWindow):
                 self.block_buttons[key] = button
                 self.time_grid.addWidget(button, row, column)
 
+        end_label = QLabel("24")
+        end_label.setObjectName("HourLabel")
+        end_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self.time_grid.addWidget(end_label, len(HOURS) + 1, 0)
+
         self.time_grid.setColumnStretch(0, 0)
         self.time_grid.setColumnMinimumWidth(0, 26)
         for column in range(1, len(MINUTES) + 1):
@@ -235,6 +240,7 @@ class MainWindow(QMainWindow):
         self.time_grid.setRowStretch(0, 0)
         for row in range(1, len(HOURS) + 1):
             self.time_grid.setRowStretch(row, 1)
+        self.time_grid.setRowStretch(len(HOURS) + 1, 0)
 
         self.plan_scroll.setWidget(self.time_grid_widget)
         self.time_grid_widget.set_block_buttons(self.block_buttons)
@@ -411,7 +417,7 @@ class MainWindow(QMainWindow):
             self.selected_block_label.setText(text)
 
     def prepare_timer(self, todo_id: int, block_key: str | None = None) -> None:
-        if self.running and self.running["mode"] in {"focus", "break"}:
+        if self.running and self.running["mode"] in {"focus", "break", "paused"}:
             self.finish_current_timer_segment()
         todo = self.todo_lookup[todo_id]
         self.running = {
@@ -428,6 +434,8 @@ class MainWindow(QMainWindow):
             "set_number": 1,
             "focus_alert_shown": False,
             "break_alert_shown": False,
+            "visual_alert_mode": None,
+            "visual_alert_started_at": None,
         }
         self.pause_button.setText("실행")
         self.pause_button.setObjectName("PrimaryButton")
@@ -448,7 +456,7 @@ class MainWindow(QMainWindow):
         if self.running["mode"] in {"focus", "break"}:
             self.finish_current_timer_segment()
             self.running["mode"] = "paused"
-            self.tick.stop()
+            self.running["segment_started_at"] = time.time()
             self.pause_button.setText("실행")
             self.pause_button.setObjectName("PrimaryButton")
             self.repolish(self.pause_button)
@@ -465,6 +473,8 @@ class MainWindow(QMainWindow):
     def start_timer_segment(self, mode: str) -> None:
         if not self.running:
             return
+        if self.running["mode"] == "paused":
+            self.finish_current_timer_segment()
         self.running["mode"] = mode
         self.running["segment_started_at"] = time.time()
         self.tick.start(1000)
@@ -477,10 +487,12 @@ class MainWindow(QMainWindow):
         self.update_timer()
 
     def finish_current_timer_segment(self) -> None:
-        if not self.running or self.running["mode"] not in {"focus", "break"}:
+        if not self.running or self.running["mode"] not in {"focus", "break", "paused"}:
             return
         ended = time.time()
         started = self.running["segment_started_at"]
+        if started is None:
+            return
         mode = self.running["mode"]
         seconds = max(1, int(ended - started))
         self.running["segments"].append({"mode": mode, "start": started, "end": ended})
@@ -498,6 +510,17 @@ class MainWindow(QMainWindow):
         self.running["segment_started_at"] = ended
         self.refresh_stats()
         self.refresh_timer_visual()
+
+    def show_timer_alert(self, title: str, message: str, visual_mode: str | None = None) -> None:
+        if visual_mode and self.running:
+            self.running["visual_alert_mode"] = visual_mode
+            self.running["visual_alert_started_at"] = time.time()
+            self.refresh_timer_visual()
+            QApplication.processEvents()
+        QMessageBox.information(self, title, message)
+        if self.running:
+            self.running["visual_alert_mode"] = None
+            self.running["visual_alert_started_at"] = None
 
     def update_timer(self) -> None:
         if not self.running:
@@ -546,13 +569,15 @@ class MainWindow(QMainWindow):
                 return
             self.running["focus_alert_shown"] = True
             self.play_alarm()
-            QMessageBox.information(self, "집중 시간 종료", "25분 집중 시간이 끝났습니다. 확인을 누르면 5분 휴식이 시작됩니다.")
+            self.show_timer_alert("집중 시간 종료", "25분 집중 시간이 끝났습니다. 확인을 누르면 5분 휴식이 시작됩니다.", "break")
             self.finish_current_timer_segment()
             self.start_timer_segment("break")
         elif self.running["mode"] == "break" and self.segment_elapsed_seconds("break") >= POMODORO_BREAK_SECONDS:
             if self.running["break_alert_shown"]:
                 return
             self.running["break_alert_shown"] = True
+            self.refresh_timer_visual()
+            QApplication.processEvents()
             self.play_alarm()
             QMessageBox.information(self, "휴식 시간 종료", "5분 휴식 시간이 끝났습니다.")
             self.finish_current_timer_segment()
@@ -614,8 +639,16 @@ class MainWindow(QMainWindow):
         if not self.running:
             return []
         segments = list(self.running["segments"])
-        if self.running["mode"] in {"focus", "break"}:
+        if self.running["mode"] in {"focus", "break", "paused"}:
             segments.append({"mode": self.running["mode"], "start": self.running["segment_started_at"], "end": time.time()})
+        if self.running.get("visual_alert_mode") and self.running.get("visual_alert_started_at"):
+            segments.append(
+                {
+                    "mode": self.running["visual_alert_mode"],
+                    "start": self.running["visual_alert_started_at"],
+                    "end": time.time(),
+                }
+            )
         return segments
 
     def refresh_timer_visual(self) -> None:
@@ -655,7 +688,7 @@ class MainWindow(QMainWindow):
                 self.store.set_todo_status(self.selected_todo_id, "done")
                 self.refresh_all()
             return
-        if self.running["mode"] in {"focus", "break"}:
+        if self.running["mode"] in {"focus", "break", "paused"}:
             self.finish_current_timer_segment()
         self.tick.stop()
         self.store.set_todo_status(self.running["todo_id"], "done")

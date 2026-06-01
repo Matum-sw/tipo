@@ -138,8 +138,8 @@ class TimeMarkerOverlay(QWidget):
         right = last.x() + last.width()
         progress = ((now.minute * 60) + now.second) / 3600
         x = left + (right - left) * progress
-        y1 = first.y() - 6
-        y2 = first.y() + first.height() + 6
+        y1 = first.y()
+        y2 = first.y() + first.height()
 
         painter.setPen(QPen(QColor("#2f7df6"), 3))
         painter.drawLine(int(x), y1, int(x), y2)
@@ -192,8 +192,8 @@ class TimeMarkerOverlay(QWidget):
                 right = last.x() + last.width()
                 x1 = left + (right - left) * (hour_start_seconds / 3600)
                 x2 = left + (right - left) * (hour_end_seconds / 3600)
-                rect = QRectF(x1, first.y() + 5, max(4, x2 - x1), first.height() - 10)
-                painter.drawRoundedRect(rect, 8, 8)
+                rect = QRectF(x1, first.y(), max(4, x2 - x1), first.height())
+                painter.drawRect(rect)
 
 
 class TimeBlockButton(QPushButton):

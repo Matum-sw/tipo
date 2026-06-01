@@ -200,12 +200,12 @@ QPushButton:hover {
 }
 
 #DangerButton {
-  background: #fff2f4;
-  color: #d9485f;
+  background: #e5484d;
+  color: #ffffff;
 }
 
 #DangerButton:hover {
-  background: #ffe6ea;
+  background: #d63f44;
 }
 
 #TimerValue {
@@ -292,6 +292,7 @@ QScrollBar:horizontal {
   color: #93a0b4;
   font-weight: 700;
   font-size: 12px;
+  padding-top: 0;
 }
 
 #TimelineHeader {
@@ -309,8 +310,8 @@ QScrollBar:horizontal {
 }
 
 #TimeBlock[segment="first"] {
-  border-top-left-radius: 13px;
-  border-bottom-left-radius: 13px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 #TimeBlock[segment="middle"] {
@@ -319,8 +320,8 @@ QScrollBar:horizontal {
 
 #TimeBlock[segment="last"] {
   border-left: none;
-  border-top-right-radius: 13px;
-  border-bottom-right-radius: 13px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 #TimeBlock:hover {

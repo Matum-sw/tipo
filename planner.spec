@@ -1,7 +1,10 @@
 # Build with: pyinstaller planner.spec
 
+from pathlib import Path
+
 
 block_cipher = None
+icon_file = Path("assets/app_icon.ico")
 
 a = Analysis(
     ["app.py"],
@@ -45,6 +48,7 @@ exe = EXE(
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
+    icon=str(icon_file) if icon_file.exists() else None,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
