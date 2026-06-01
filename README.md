@@ -30,36 +30,13 @@ python -m PyInstaller planner.spec --noconfirm
 - Markdown 리포트 생성
 - OpenAI API 기반 피드백
 
-## 알람 사운드
 
-알람 사운드는 아래 경로에 WAV 파일을 넣으면 재생됩니다.
-
-```text
-assets/alarm.wav
-```
-
-파일이 없으면 알람 재생만 건너뛰고 팝업은 정상 표시됩니다.
-
-## 프로그램 아이콘
-
-앱 아이콘 이미지는 `assets` 폴더에 아래 이름 중 하나로 넣으면 자동 적용됩니다.
-
-```text
-assets/app_icon.ico
-assets/app_icon.png
-assets/app_icon.icns
-assets/app_icon.jpg
-assets/app_icon.jpeg
-assets/아이콘.png
-```
-
-Windows exe 파일 자체의 아이콘까지 바꾸려면 `assets/app_icon.ico`를 사용하세요.
 
 ## 데이터 저장
 
 개발 실행 시 데이터는 프로젝트 내부 `data/planner.sqlite3`에 저장됩니다.
 
-Windows exe 실행 시 데이터는 사용자 홈의 `.daily_time_box_planner/data/planner.sqlite3`에 저장됩니다.
+실행 시 데이터는 사용자 홈의 `.daily_time_box_planner/data/planner.sqlite3`에 저장됩니다.
 
 ## 구조
 
