@@ -7,7 +7,6 @@ from PySide6.QtCore import QDate, QTimer, Qt, QUrl, QSize
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
-    QDateEdit,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 from core.openai_feedback import AIFeedbackService
 from core.paths import ROOT_DIR
 from core.reporting import build_markdown_report, save_markdown_report
+from ui.date_dialog import DateDialog
 from ui.subject_dialog import SubjectDialog
 from ui.widgets import Card, Pill, TimeBlockButton, TimeGridWidget, TimelineHeader
 
@@ -83,12 +83,10 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(34, 24, 34, 30)
         root.setSpacing(18)
 
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.date_edit.setDate(QDate.currentDate())
-        self.date_edit.setMinimumWidth(148)
-        self.date_edit.dateChanged.connect(self.change_date)
+        self.date_button = QPushButton()
+        self.date_button.setObjectName("DateButton")
+        self.date_button.clicked.connect(self.open_date_dialog)
+        self.update_date_button()
 
         board = QHBoxLayout()
         board.setSpacing(22)
@@ -124,7 +122,7 @@ class MainWindow(QMainWindow):
         subject_button.clicked.connect(self.open_subjects)
         subject_button.setObjectName("GhostButton")
 
-        controls_layout.addWidget(self.date_edit, 1)
+        controls_layout.addWidget(self.date_button, 1)
         controls_layout.addWidget(subject_button, 1)
         parent.addWidget(controls)
 
@@ -172,10 +170,7 @@ class MainWindow(QMainWindow):
         card.layout.addWidget(self.brain_dump, 1)
 
     def build_plan_card(self, parent) -> None:
-        card = Card(
-            "Time Plan",
-            "To Do를 선택하고 시간 블록을 클릭하거나 드래그하면 배치됩니다.",
-        )
+        card = Card("Time Plan", "To Do를 선택하고 시간 블록을 클릭하거나 드래그하면 배치됩니다.")
         parent.addWidget(card, 1)
 
         plan_actions = QHBoxLayout()
@@ -302,11 +297,10 @@ class MainWindow(QMainWindow):
 
     def add_todo(self) -> None:
         title = self.todo_input.text().strip()
-        if not title:
-            return
-        self.store.add_todo(self.day, title, self.selected_subject_id)
-        self.todo_input.clear()
-        self.refresh_todos()
+        if title:
+            self.store.add_todo(self.day, title, self.selected_subject_id)
+            self.todo_input.clear()
+            self.refresh_todos()
 
     def select_todo(self, item: QListWidgetItem) -> None:
         self.selected_todo_id = item.data(Qt.UserRole)
@@ -371,13 +365,12 @@ class MainWindow(QMainWindow):
             self.refresh_todos()
 
     def paint_todo_to_block(self, block_key: str) -> None:
-        if not self.drag_todo_id or block_key in self.drag_visited_blocks:
-            return
-        self.store.assign_block(self.day, block_key, self.drag_todo_id)
-        self.set_selected_block(block_key)
-        self.drag_visited_blocks.add(block_key)
-        self.drag_last_block_key = block_key
-        self.refresh_single_block(block_key, self.drag_todo_id)
+        if self.drag_todo_id and block_key not in self.drag_visited_blocks:
+            self.store.assign_block(self.day, block_key, self.drag_todo_id)
+            self.set_selected_block(block_key)
+            self.drag_visited_blocks.add(block_key)
+            self.drag_last_block_key = block_key
+            self.refresh_single_block(block_key, self.drag_todo_id)
 
     def delete_selected_block(self) -> None:
         if not self.selected_block_key:
@@ -467,10 +460,7 @@ class MainWindow(QMainWindow):
         self.running["mode"] = mode
         self.running["segment_started_at"] = time.time()
         self.tick.start(1000)
-        if mode == "focus":
-            self.pause_button.setText("중단")
-        else:
-            self.pause_button.setText("휴식 중단")
+        self.pause_button.setText("중단" if mode == "focus" else "휴식 중단")
         self.pause_button.setObjectName("DangerButton")
         self.repolish(self.pause_button)
         self.update_timer()
@@ -517,7 +507,11 @@ class MainWindow(QMainWindow):
     def segment_elapsed_seconds(self, mode: str) -> int:
         if not self.running:
             return 0
-        elapsed = sum(max(1, int(segment["end"] - segment["start"])) for segment in self.running["segments"] if segment["mode"] == mode)
+        elapsed = sum(
+            max(1, int(segment["end"] - segment["start"]))
+            for segment in self.running["segments"]
+            if segment["mode"] == mode
+        )
         if self.running["mode"] == mode:
             elapsed += max(0, int(time.time() - self.running["segment_started_at"]))
         return elapsed
@@ -667,7 +661,17 @@ class MainWindow(QMainWindow):
         self.selected_todo_id = None
         self.pomodoro_history = []
         self.set_selected_block(None)
+        self.update_date_button()
         self.refresh_all()
+
+    def open_date_dialog(self) -> None:
+        dialog = DateDialog(QDate.fromString(self.day, "yyyy-MM-dd"), self)
+        if dialog.exec() == DateDialog.Accepted:
+            self.change_date(dialog.selected_date())
+
+    def update_date_button(self) -> None:
+        if hasattr(self, "date_button"):
+            self.date_button.setText(QDate.fromString(self.day, "yyyy-MM-dd").toString("yyyy-MM-dd"))
 
     def open_subjects(self) -> None:
         SubjectDialog(self.store, self).exec()
