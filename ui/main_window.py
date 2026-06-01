@@ -33,7 +33,7 @@ from ui.subject_dialog import SubjectDialog
 from ui.widgets import Card, Pill, TimeBlockButton, TimeGridWidget, TimelineHeader
 
 
-HOURS = list(range(4, 25))
+HOURS = list(range(24))
 MINUTES = (0, 10, 20, 30, 40, 50)
 POMODORO_FOCUS_SECONDS = 25 * 60
 POMODORO_BREAK_SECONDS = 5 * 60
@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         self.pomodoro_history = []
         self.tick = QTimer(self)
         self.tick.timeout.connect(self.update_timer)
+        self.current_time_scroll_timer = QTimer(self)
+        self.current_time_scroll_timer.timeout.connect(self.center_current_time_in_plan)
+        self.current_time_scroll_timer.start(60_000)
         self.alarm = QSoundEffect(self)
         self.alarm.setVolume(0.8)
         if ALARM_FILE.exists():
@@ -85,6 +88,7 @@ class MainWindow(QMainWindow):
 
         self.date_button = QPushButton()
         self.date_button.setObjectName("DateButton")
+        self.date_button.setMinimumWidth(148)
         self.date_button.clicked.connect(self.open_date_dialog)
         self.update_date_button()
 
@@ -170,7 +174,10 @@ class MainWindow(QMainWindow):
         card.layout.addWidget(self.brain_dump, 1)
 
     def build_plan_card(self, parent) -> None:
-        card = Card("Time Plan", "To Do를 선택하고 시간 블록을 클릭하거나 드래그하면 배치됩니다.")
+        card = Card(
+            "Time Plan",
+            "To Do를 선택하고 시간 블록을 클릭하거나 드래그하면 배치됩니다.",
+        )
         parent.addWidget(card, 1)
 
         plan_actions = QHBoxLayout()
@@ -183,11 +190,11 @@ class MainWindow(QMainWindow):
         plan_actions.addWidget(self.delete_block_button)
         card.layout.addLayout(plan_actions)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setObjectName("PlanScroll")
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.plan_scroll = QScrollArea()
+        self.plan_scroll.setWidgetResizable(True)
+        self.plan_scroll.setObjectName("PlanScroll")
+        self.plan_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.plan_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.time_grid_widget = TimeGridWidget(lambda: self.day)
         self.time_grid_widget.setObjectName("TimeGrid")
@@ -201,7 +208,7 @@ class MainWindow(QMainWindow):
         self.time_grid.addWidget(TimelineHeader(), 0, 1, 1, len(MINUTES))
 
         for row, hour in enumerate(HOURS, start=1):
-            hour_label = QLabel(str(hour))
+            hour_label = QLabel(f"{hour:02d}")
             hour_label.setObjectName("HourLabel")
             hour_label.setAlignment(Qt.AlignCenter)
             self.time_grid.addWidget(hour_label, row, 0)
@@ -229,9 +236,10 @@ class MainWindow(QMainWindow):
         for row in range(1, len(HOURS) + 1):
             self.time_grid.setRowStretch(row, 1)
 
-        scroll.setWidget(self.time_grid_widget)
+        self.plan_scroll.setWidget(self.time_grid_widget)
         self.time_grid_widget.set_block_buttons(self.block_buttons)
-        card.layout.addWidget(scroll, 1)
+        card.layout.addWidget(self.plan_scroll, 1)
+        QTimer.singleShot(0, self.center_current_time_in_plan)
 
     def build_timer_card(self, parent) -> None:
         card = Card("Timer")
@@ -297,10 +305,11 @@ class MainWindow(QMainWindow):
 
     def add_todo(self) -> None:
         title = self.todo_input.text().strip()
-        if title:
-            self.store.add_todo(self.day, title, self.selected_subject_id)
-            self.todo_input.clear()
-            self.refresh_todos()
+        if not title:
+            return
+        self.store.add_todo(self.day, title, self.selected_subject_id)
+        self.todo_input.clear()
+        self.refresh_todos()
 
     def select_todo(self, item: QListWidgetItem) -> None:
         self.selected_todo_id = item.data(Qt.UserRole)
@@ -365,12 +374,13 @@ class MainWindow(QMainWindow):
             self.refresh_todos()
 
     def paint_todo_to_block(self, block_key: str) -> None:
-        if self.drag_todo_id and block_key not in self.drag_visited_blocks:
-            self.store.assign_block(self.day, block_key, self.drag_todo_id)
-            self.set_selected_block(block_key)
-            self.drag_visited_blocks.add(block_key)
-            self.drag_last_block_key = block_key
-            self.refresh_single_block(block_key, self.drag_todo_id)
+        if not self.drag_todo_id or block_key in self.drag_visited_blocks:
+            return
+        self.store.assign_block(self.day, block_key, self.drag_todo_id)
+        self.set_selected_block(block_key)
+        self.drag_visited_blocks.add(block_key)
+        self.drag_last_block_key = block_key
+        self.refresh_single_block(block_key, self.drag_todo_id)
 
     def delete_selected_block(self) -> None:
         if not self.selected_block_key:
@@ -449,8 +459,6 @@ class MainWindow(QMainWindow):
 
     def current_running_task(self) -> tuple[str | None, int | None]:
         now = datetime.now()
-        if now.hour not in HOURS:
-            return None, None
         block_key = f"{now.hour:02d}:{(now.minute // 10) * 10:02d}"
         return block_key, self.store.blocks_for_day(self.day).get(block_key)
 
@@ -460,7 +468,10 @@ class MainWindow(QMainWindow):
         self.running["mode"] = mode
         self.running["segment_started_at"] = time.time()
         self.tick.start(1000)
-        self.pause_button.setText("중단" if mode == "focus" else "휴식 중단")
+        if mode == "focus":
+            self.pause_button.setText("중단")
+        else:
+            self.pause_button.setText("휴식 중단")
         self.pause_button.setObjectName("DangerButton")
         self.repolish(self.pause_button)
         self.update_timer()
@@ -507,11 +518,7 @@ class MainWindow(QMainWindow):
     def segment_elapsed_seconds(self, mode: str) -> int:
         if not self.running:
             return 0
-        elapsed = sum(
-            max(1, int(segment["end"] - segment["start"]))
-            for segment in self.running["segments"]
-            if segment["mode"] == mode
-        )
+        elapsed = sum(max(1, int(segment["end"] - segment["start"])) for segment in self.running["segments"] if segment["mode"] == mode)
         if self.running["mode"] == mode:
             elapsed += max(0, int(time.time() - self.running["segment_started_at"]))
         return elapsed
@@ -615,6 +622,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, "time_grid_widget"):
             self.time_grid_widget.set_timer_segments(self.active_timer_segments())
 
+    def center_current_time_in_plan(self) -> None:
+        if self.day != datetime.now().date().isoformat() or not hasattr(self, "plan_scroll"):
+            return
+
+        now = datetime.now()
+        block = self.block_buttons.get(f"{now.hour:02d}:{(now.minute // 10) * 10:02d}")
+        if not block:
+            return
+
+        scroll_bar = self.plan_scroll.verticalScrollBar()
+        viewport_height = self.plan_scroll.viewport().height()
+        target = block.y() + (block.height() // 2) - (viewport_height // 2)
+        target = max(scroll_bar.minimum(), min(target, scroll_bar.maximum()))
+        scroll_bar.setValue(target)
+
     def cancel_timer_session(self) -> None:
         if not self.running:
             return
@@ -660,8 +682,8 @@ class MainWindow(QMainWindow):
         self.day = qdate.toString("yyyy-MM-dd")
         self.selected_todo_id = None
         self.pomodoro_history = []
-        self.set_selected_block(None)
         self.update_date_button()
+        self.set_selected_block(None)
         self.refresh_all()
 
     def open_date_dialog(self) -> None:
@@ -683,6 +705,7 @@ class MainWindow(QMainWindow):
         self.refresh_brain_dump()
         self.refresh_blocks()
         self.refresh_stats()
+        QTimer.singleShot(0, self.center_current_time_in_plan)
 
     def refresh_subjects(self) -> None:
         subjects = self.store.subjects(include_other=True)
