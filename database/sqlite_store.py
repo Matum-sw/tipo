@@ -169,6 +169,37 @@ class SQLiteStore:
         self.connection.execute("DELETE FROM time_blocks WHERE day = ?", (day,))
         self.connection.commit()
 
+    def clear_unprotected_blocks_for_day(self, day: str) -> None:
+        """타이머 기록이 없는 블록만 삭제 (타이머 작동 블록은 보호)."""
+        self.connection.execute(
+            """
+            DELETE FROM time_blocks
+            WHERE day = ?
+            AND NOT EXISTS (
+                SELECT 1 FROM timer_records tr
+                WHERE tr.todo_id = time_blocks.todo_id
+                AND tr.day = time_blocks.day
+                AND tr.event_type IN ('focus', 'break', 'completed')
+            )
+            """,
+            (day,),
+        )
+        self.connection.commit()
+
+    def block_has_timer_records(self, day: str, block_key: str) -> bool:
+        """해당 블록의 할 일에 타이머 기록이 있는지 확인."""
+        row = self.connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM time_blocks tb
+            INNER JOIN timer_records tr ON tr.todo_id = tb.todo_id AND tr.day = tb.day
+            WHERE tb.day = ? AND tb.block_key = ?
+            AND tr.event_type IN ('focus', 'break', 'completed')
+            """,
+            (day, block_key),
+        ).fetchone()
+        return row["count"] > 0
+
     def blocks_for_day(self, day: str) -> dict[str, int]:
         rows = self.connection.execute("SELECT block_key, todo_id FROM time_blocks WHERE day = ?", (day,)).fetchall()
         return {row["block_key"]: row["todo_id"] for row in rows}

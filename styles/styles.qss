@@ -118,14 +118,15 @@ QListWidget {
 }
 
 QListWidget::item {
-  border-radius: 14px;
+  border-radius: 10px;
   padding: 4px;
-  margin: 4px;
+  margin: 3px;
+  border: none;
 }
 
 QListWidget::item:selected {
-  background: #e9f2ff;
-  color: #1f5fcf;
+  background: transparent;
+  border: none;
 }
 
 #TodoItemWidget {

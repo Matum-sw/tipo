@@ -56,7 +56,8 @@ class TimelineHeader(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("TimelineHeader")
-        self.setMinimumHeight(30)
+        self.setMinimumHeight(38)
+        self.setFixedHeight(38)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def paintEvent(self, event) -> None:
@@ -210,7 +211,8 @@ class TimeBlockButton(QPushButton):
         self.setMouseTracking(True)
         self.setObjectName("TimeBlock")
         self.setProperty("filled", False)
-        self.setMinimumHeight(42)
+        self.setMinimumHeight(28)
+        self.setMaximumHeight(40)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_task_text(self, text: str) -> None:

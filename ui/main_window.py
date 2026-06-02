@@ -11,11 +11,9 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -30,6 +28,7 @@ from core.paths import ROOT_DIR
 from core.reporting import build_markdown_report, save_markdown_report
 from ui.date_dialog import DateDialog
 from ui.subject_dialog import SubjectDialog
+from ui.todo_add_dialog import TodoAddDialog
 from ui.widgets import Card, Pill, TimeBlockButton, TimeGridWidget, TimelineHeader
 
 
@@ -150,34 +149,29 @@ class MainWindow(QMainWindow):
         parent.addWidget(controls)
 
     def build_todo_card(self, parent) -> None:
-        card = Card("To Do List")
+        card = Card("")  # 제목은 아래 헤더 행에서 직접 구성
         parent.addWidget(card, 3)
 
-        self.todo_input = QLineEdit()
-        self.todo_input.setPlaceholderText("오늘 할 일 입력")
-        self.todo_input.returnPressed.connect(self.add_todo)
-        card.layout.addWidget(self.todo_input)
-
-        actions = QHBoxLayout()
-        self.subject_button = QPushButton("과목")
-        self.subject_button.setObjectName("SubjectButton")
-        self.subject_button.setToolTip("과목 선택")
-        self.subject_button.setFixedWidth(104)
-        self.subject_menu = QMenu(self)
-        self.subject_button.setMenu(self.subject_menu)
-        self.add_button = QPushButton("추가")
+        # 제목 + 추가/삭제 버튼을 같은 행에 배치
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+        title_lbl = QLabel("To Do List")
+        title_lbl.setObjectName("CardTitle")
+        self.add_button = QPushButton("+")
         self.add_button.setObjectName("PrimaryButton")
-        self.add_button.setFixedWidth(92)
-        self.add_button.clicked.connect(self.add_todo)
-        self.delete_todo_button = QPushButton("삭제")
+        self.add_button.setFixedSize(34, 34)
+        self.add_button.setToolTip("할 일 추가")
+        self.add_button.clicked.connect(self.open_add_todo_dialog)
+        self.delete_todo_button = QPushButton("−")
         self.delete_todo_button.setObjectName("DangerButton")
-        self.delete_todo_button.setFixedWidth(92)
+        self.delete_todo_button.setFixedSize(34, 34)
+        self.delete_todo_button.setToolTip("선택 항목 삭제")
         self.delete_todo_button.clicked.connect(self.delete_selected_todo)
-        actions.addWidget(self.subject_button)
-        actions.addWidget(self.add_button)
-        actions.addWidget(self.delete_todo_button)
-        actions.addStretch(1)
-        card.layout.addLayout(actions)
+        header.addWidget(title_lbl, 1)
+        header.addWidget(self.add_button)
+        header.addWidget(self.delete_todo_button)
+        card.layout.addLayout(header)
 
         self.selected_todo_label = QLabel("선택된 할 일 없음")
         self.selected_todo_label.setObjectName("SelectedTodoLabel")
@@ -207,12 +201,14 @@ class MainWindow(QMainWindow):
         plan_actions = QHBoxLayout()
         self.selected_block_label = QLabel("선택된 블록 없음")
         self.selected_block_label.setObjectName("MutedText")
-        self.delete_mode_button = QPushButton("삭제 모드")
+        self.delete_mode_button = QPushButton("수정 모드")
         self.delete_mode_button.setObjectName("SoftButton")
         self.delete_mode_button.setCheckable(True)
+        self.delete_mode_button.setFixedHeight(30)
         self.delete_mode_button.clicked.connect(self.toggle_delete_mode)
         clear_all_button = QPushButton("전체 삭제")
         clear_all_button.setObjectName("DangerButton")
+        clear_all_button.setFixedHeight(30)
         clear_all_button.clicked.connect(self.clear_all_blocks)
         plan_actions.addWidget(self.selected_block_label, 1)
         plan_actions.addWidget(self.delete_mode_button)
@@ -235,6 +231,7 @@ class MainWindow(QMainWindow):
 
         self.time_grid.addWidget(QLabel(""), 0, 0)
         self.time_grid.addWidget(TimelineHeader(), 0, 1, 1, len(MINUTES))
+        self.time_grid.setRowMinimumHeight(0, 38)
 
         for row, hour in enumerate(HOURS, start=1):
             hour_label = QLabel(f"{hour:02d}")
@@ -338,12 +335,10 @@ class MainWindow(QMainWindow):
         report_actions.addWidget(ai_button)
         card.layout.addLayout(report_actions)
 
-    def add_todo(self) -> None:
-        title = self.todo_input.text().strip()
-        if not title:
-            return
-        self.store.add_todo(self.day, title, self.selected_subject_id)
-        self.todo_input.clear()
+    def open_add_todo_dialog(self) -> None:
+        dialog = TodoAddDialog(self.store, self.day, self.selected_subject_id, self.subject_color_map, self)
+        dialog.exec()
+        self.selected_subject_id = dialog.selected_subject_id
         self.refresh_todos()
 
     def select_todo(self, item: QListWidgetItem) -> None:
@@ -459,6 +454,9 @@ class MainWindow(QMainWindow):
         if block_key in self.drag_visited_blocks:
             return
         self.drag_visited_blocks.add(block_key)
+        # 타이머가 작동한 블록은 삭제 불가
+        if self.store.block_has_timer_records(self.day, block_key):
+            return
         self.store.delete_block(self.day, block_key)
         button = self.block_buttons.get(block_key)
         if button:
@@ -475,8 +473,10 @@ class MainWindow(QMainWindow):
     def toggle_delete_mode(self) -> None:
         self.delete_mode = self.delete_mode_button.isChecked()
         if self.delete_mode:
+            self.delete_mode_button.setText("삭제 모드")
             self.delete_mode_button.setObjectName("DangerButton")
         else:
+            self.delete_mode_button.setText("수정 모드")
             self.delete_mode_button.setObjectName("SoftButton")
         self.repolish(self.delete_mode_button)
 
@@ -488,7 +488,7 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            self.store.clear_blocks_for_day(self.day)
+            self.store.clear_unprotected_blocks_for_day(self.day)
             if self.running:
                 self.cancel_timer_session()
             self.selected_block_key = None
@@ -575,9 +575,9 @@ class MainWindow(QMainWindow):
         self.running["segment_started_at"] = time.time()
         self.tick.start(1000)
         if mode == "focus":
-            self.pause_button.setText("중단")
+            self.pause_button.setText("일시정지")
         else:
-            self.pause_button.setText("휴식 중단")
+            self.pause_button.setText("휴식 일시정지")
         self.pause_button.setObjectName("DangerButton")
         self.repolish(self.pause_button)
         self.update_timer()
@@ -803,7 +803,7 @@ class MainWindow(QMainWindow):
 
     def save_brain_dump(self) -> None:
         if hasattr(self, "brain_dump"):
-            self.store.save_brain_dump(self.day, self.brain_dump.toPlainText())
+            self.store.save_brain_dump("global", self.brain_dump.toPlainText())
 
     def change_date(self, qdate: QDate) -> None:
         if self.running:
@@ -856,26 +856,12 @@ class MainWindow(QMainWindow):
                 self.subject_color_idx_map[subject.id] = color_idx % len(SUBJECT_COLORS)
                 color_idx += 1
 
-        self.subject_menu.clear()
-        selected_subject = subjects[0]
-        for subject in subjects:
-            if subject.id == self.selected_subject_id:
-                selected_subject = subject
-            action = self.subject_menu.addAction(subject.name)
-            action.setCheckable(True)
-            action.setChecked(subject.id == self.selected_subject_id)
-            action.triggered.connect(lambda _checked=False, subject_id=subject.id: self.select_subject(subject_id))
-
-        color = self.subject_color_map.get(selected_subject.id, SUBJECT_COLORS[0])
-        self.subject_button.setText(selected_subject.name)
-        self.subject_button.setToolTip(f"선택된 과목: {selected_subject.name}")
-        self.subject_button.setStyleSheet(
-            f"background-color: {color['bg']}; border: 1px solid {color['border']}; color: {color['text']};"
-        )
+        # selected_subject_id 유효성 보장
+        if not any(s.id == self.selected_subject_id for s in subjects):
+            self.selected_subject_id = subjects[0].id
 
     def select_subject(self, subject_id: int) -> None:
         self.selected_subject_id = subject_id
-        self.refresh_subjects()
 
     def refresh_todos(self) -> None:
         self.todo_list.clear()
@@ -914,15 +900,10 @@ class MainWindow(QMainWindow):
         frame.setAttribute(Qt.WA_TransparentForMouseEvents)
         if is_selected:
             frame.setStyleSheet(
-                f"background-color: {color['bg']};"
-                f"border-left: 4px solid {color['text']};"
-                f"border-radius: 10px;"
+                f"background-color: {color['bg']}; border-radius: 10px;"
             )
         else:
-            frame.setStyleSheet(
-                f"background-color: transparent;"
-                f"border-left: 3px solid {color['border']};"
-            )
+            frame.setStyleSheet("background-color: transparent;")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(12, 12, 10, 12)
         layout.setSpacing(6)
@@ -954,7 +935,7 @@ class MainWindow(QMainWindow):
         return frame
 
     def refresh_brain_dump(self) -> None:
-        content = self.store.brain_dump(self.day)
+        content = self.store.brain_dump("global")
         if self.brain_dump.toPlainText() != content:
             self.brain_dump.blockSignals(True)
             self.brain_dump.setPlainText(content)
