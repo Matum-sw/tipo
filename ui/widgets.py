@@ -206,6 +206,7 @@ class TimeBlockButton(QPushButton):
         super().__init__("", parent)
         self.block_key = block_key
         self.task_text = ""
+        self.subject_color = None
         self.setMouseTracking(True)
         self.setObjectName("TimeBlock")
         self.setProperty("filled", False)
@@ -215,6 +216,10 @@ class TimeBlockButton(QPushButton):
     def set_task_text(self, text: str) -> None:
         self.task_text = text
         self.setText("")
+        self.update()
+
+    def set_subject_color(self, color: dict | None) -> None:
+        self.subject_color = color
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -233,6 +238,8 @@ class TimeBlockButton(QPushButton):
         painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, self.task_text)
 
     def text_color(self) -> str:
+        if self.subject_color and self.property("filled"):
+            return self.subject_color["text"]
         if self.property("life"):
             return "#477d37"
         if self.property("filled"):

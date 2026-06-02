@@ -132,6 +132,14 @@ QListWidget::item:selected {
   background: transparent;
 }
 
+#SelectedTodoLabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: #738095;
+  padding: 2px 4px;
+  border-radius: 8px;
+}
+
 #TodoItemTitle {
   color: #202636;
   font-size: 14px;
@@ -340,6 +348,14 @@ QScrollBar:horizontal {
   border: 1px solid #cfeac9;
   color: #477d37;
 }
+
+#TimeBlock[color_idx="0"][filled="true"] { background: #eaf3ff; border: 1px solid #b9d4ff; }
+#TimeBlock[color_idx="1"][filled="true"] { background: #f3eaff; border: 1px solid #c9b9ff; }
+#TimeBlock[color_idx="2"][filled="true"] { background: #fff0ea; border: 1px solid #ffd0b9; }
+#TimeBlock[color_idx="3"][filled="true"] { background: #ffeaf5; border: 1px solid #ffb9d9; }
+#TimeBlock[color_idx="4"][filled="true"] { background: #eafaf5; border: 1px solid #b9e8d4; }
+#TimeBlock[color_idx="5"][filled="true"] { background: #fafaea; border: 1px solid #e8e4b9; }
+#TimeBlock[color_idx="6"][filled="true"] { background: #ffeaea; border: 1px solid #ffb9b9; }
 
 #TimeBlock[selected="true"] {
   border: 2px solid #3f7df1;

@@ -39,6 +39,20 @@ POMODORO_FOCUS_SECONDS = 25 * 60
 POMODORO_BREAK_SECONDS = 5 * 60
 ALARM_FILE = ROOT_DIR / "assets" / "alarm.wav"
 
+ALL_BLOCK_KEYS = [f"{h:02d}:{m:02d}" for h in HOURS for m in MINUTES]
+BLOCK_KEY_INDEX = {k: i for i, k in enumerate(ALL_BLOCK_KEYS)}
+
+SUBJECT_COLORS = [
+    {"bg": "#eaf3ff", "border": "#b9d4ff", "text": "#1f5fcf"},  # 0: blue
+    {"bg": "#f3eaff", "border": "#c9b9ff", "text": "#5c1fcf"},  # 1: purple
+    {"bg": "#fff0ea", "border": "#ffd0b9", "text": "#a84800"},  # 2: orange
+    {"bg": "#ffeaf5", "border": "#ffb9d9", "text": "#b8006b"},  # 3: pink
+    {"bg": "#eafaf5", "border": "#b9e8d4", "text": "#006b4c"},  # 4: teal
+    {"bg": "#fafaea", "border": "#e8e4b9", "text": "#7a7a00"},  # 5: yellow-green
+    {"bg": "#ffeaea", "border": "#ffb9b9", "text": "#c00000"},  # 6: red
+]
+SUBJECT_COLOR_OTHER = {"bg": "#eff8ed", "border": "#cfeac9", "text": "#477d37"}
+
 
 class MainWindow(QMainWindow):
     def __init__(self, store):
@@ -51,10 +65,15 @@ class MainWindow(QMainWindow):
         self.selected_block_key = None
         self.todo_lookup = {}
         self.block_buttons = {}
+        self.subject_color_map = {}
+        self.subject_color_idx_map = {}
         self.drag_todo_id = None
         self.drag_visited_blocks = set()
         self.drag_is_painting = False
         self.drag_last_block_key = None
+        self.drag_start_block_key = None
+        self.drag_existing_blocks = {}
+        self.delete_mode = False
         self.running = None
         self.pomodoro_history = []
         self.tick = QTimer(self)
@@ -160,6 +179,11 @@ class MainWindow(QMainWindow):
         actions.addStretch(1)
         card.layout.addLayout(actions)
 
+        self.selected_todo_label = QLabel("선택된 할 일 없음")
+        self.selected_todo_label.setObjectName("SelectedTodoLabel")
+        self.selected_todo_label.setWordWrap(True)
+        card.layout.addWidget(self.selected_todo_label)
+
         self.todo_list = QListWidget()
         self.todo_list.setWordWrap(True)
         self.todo_list.itemClicked.connect(self.select_todo)
@@ -183,11 +207,16 @@ class MainWindow(QMainWindow):
         plan_actions = QHBoxLayout()
         self.selected_block_label = QLabel("선택된 블록 없음")
         self.selected_block_label.setObjectName("MutedText")
-        self.delete_block_button = QPushButton("선택 블록 삭제")
-        self.delete_block_button.setObjectName("SoftButton")
-        self.delete_block_button.clicked.connect(self.delete_selected_block)
+        self.delete_mode_button = QPushButton("삭제 모드")
+        self.delete_mode_button.setObjectName("SoftButton")
+        self.delete_mode_button.setCheckable(True)
+        self.delete_mode_button.clicked.connect(self.toggle_delete_mode)
+        clear_all_button = QPushButton("전체 삭제")
+        clear_all_button.setObjectName("DangerButton")
+        clear_all_button.clicked.connect(self.clear_all_blocks)
         plan_actions.addWidget(self.selected_block_label, 1)
-        plan_actions.addWidget(self.delete_block_button)
+        plan_actions.addWidget(self.delete_mode_button)
+        plan_actions.addWidget(clear_all_button)
         card.layout.addLayout(plan_actions)
 
         self.plan_scroll = QScrollArea()
@@ -333,10 +362,18 @@ class MainWindow(QMainWindow):
         self.refresh_all()
 
     def on_block_pressed(self, block_key: str) -> None:
+        if self.delete_mode:
+            self.drag_is_painting = True
+            self.drag_visited_blocks = set()
+            self.erase_block(block_key)
+            return
+
         self.set_selected_block(block_key)
         if self.selected_todo_id:
             self.drag_todo_id = self.selected_todo_id
+            self.drag_start_block_key = block_key
             self.drag_visited_blocks = set()
+            self.drag_existing_blocks = dict(self.store.blocks_for_day(self.day))
             self.drag_is_painting = True
             self.paint_todo_to_block(block_key)
             return
@@ -349,17 +386,24 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "To Do 선택", "먼저 To Do 카드를 선택한 뒤 시간 블록을 클릭하세요.")
 
     def on_block_entered(self, block_key: str) -> None:
-        if self.drag_is_painting and self.drag_todo_id:
+        if not self.drag_is_painting:
+            return
+        if self.delete_mode:
+            self.erase_block(block_key)
+        elif self.drag_todo_id:
             self.paint_todo_to_block(block_key)
 
     def on_block_moved(self, global_pos) -> None:
-        if not self.drag_is_painting or not self.drag_todo_id:
+        if not self.drag_is_painting:
             return
         widget = QApplication.widgetAt(global_pos)
         while widget and not isinstance(widget, TimeBlockButton):
             widget = widget.parentWidget()
         if isinstance(widget, TimeBlockButton):
-            self.paint_todo_to_block(widget.block_key)
+            if self.delete_mode:
+                self.erase_block(widget.block_key)
+            elif self.drag_todo_id:
+                self.paint_todo_to_block(widget.block_key)
 
     def on_block_released(self, block_key: str) -> None:
         if not self.drag_is_painting:
@@ -368,10 +412,17 @@ class MainWindow(QMainWindow):
         visited_count = len(self.drag_visited_blocks)
         todo_id = self.drag_todo_id
         last_block_key = self.drag_last_block_key or block_key
+        was_delete_mode = self.delete_mode
         self.drag_todo_id = None
         self.drag_is_painting = False
         self.drag_last_block_key = None
+        self.drag_start_block_key = None
+        self.drag_existing_blocks = {}
         self.drag_visited_blocks = set()
+
+        if was_delete_mode:
+            return
+
         self.refresh_blocks()
 
         if visited_count == 1 and todo_id:
@@ -380,24 +431,69 @@ class MainWindow(QMainWindow):
             self.refresh_todos()
 
     def paint_todo_to_block(self, block_key: str) -> None:
-        if not self.drag_todo_id or block_key in self.drag_visited_blocks:
+        if not self.drag_todo_id:
             return
-        self.store.assign_block(self.day, block_key, self.drag_todo_id)
-        self.set_selected_block(block_key)
-        self.drag_visited_blocks.add(block_key)
-        self.drag_last_block_key = block_key
-        self.refresh_single_block(block_key, self.drag_todo_id)
 
-    def delete_selected_block(self) -> None:
-        if not self.selected_block_key:
-            QMessageBox.information(self, "블록 선택", "삭제할 Time Plan 블록을 먼저 선택하세요.")
+        if self.drag_last_block_key and self.drag_last_block_key != block_key:
+            last_idx = BLOCK_KEY_INDEX.get(self.drag_last_block_key, 0)
+            curr_idx = BLOCK_KEY_INDEX.get(block_key, 0)
+            lo, hi = min(last_idx, curr_idx), max(last_idx, curr_idx)
+            keys_to_paint = ALL_BLOCK_KEYS[lo : hi + 1]
+        else:
+            keys_to_paint = [block_key]
+
+        for key in keys_to_paint:
+            if key in self.drag_visited_blocks:
+                continue
+            existing = self.drag_existing_blocks.get(key)
+            if existing and existing != self.drag_todo_id:
+                continue  # 다른 할 일이 배치된 블록은 덮어쓰지 않음
+            self.store.assign_block(self.day, key, self.drag_todo_id)
+            self.drag_visited_blocks.add(key)
+            self.drag_last_block_key = key
+            self.refresh_single_block(key, self.drag_todo_id)
+
+        self.set_selected_block(block_key)
+
+    def erase_block(self, block_key: str) -> None:
+        if block_key in self.drag_visited_blocks:
             return
-        self.store.delete_block(self.day, self.selected_block_key)
-        if self.running and self.running["block_key"] == self.selected_block_key:
-            self.cancel_timer_session()
-        self.selected_block_key = None
-        self.update_selected_block_label()
-        self.refresh_blocks()
+        self.drag_visited_blocks.add(block_key)
+        self.store.delete_block(self.day, block_key)
+        button = self.block_buttons.get(block_key)
+        if button:
+            button.set_task_text("")
+            button.set_subject_color(None)
+            button.setProperty("filled", False)
+            button.setProperty("life", False)
+            button.setProperty("color_idx", "")
+            button.setProperty("selected", False)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
+    def toggle_delete_mode(self) -> None:
+        self.delete_mode = self.delete_mode_button.isChecked()
+        if self.delete_mode:
+            self.delete_mode_button.setObjectName("DangerButton")
+        else:
+            self.delete_mode_button.setObjectName("SoftButton")
+        self.repolish(self.delete_mode_button)
+
+    def clear_all_blocks(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "계획 전체 삭제",
+            "오늘의 모든 시간 계획을 삭제하시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.store.clear_blocks_for_day(self.day)
+            if self.running:
+                self.cancel_timer_session()
+            self.selected_block_key = None
+            self.update_selected_block_label()
+            self.refresh_blocks()
 
     def set_selected_block(self, block_key: str | None) -> None:
         previous = self.selected_block_key
@@ -747,6 +843,19 @@ class MainWindow(QMainWindow):
         if self.selected_subject_id is None or not any(subject.id == self.selected_subject_id for subject in subjects):
             self.selected_subject_id = subjects[0].id
 
+        # Build subject color maps
+        self.subject_color_map = {}
+        self.subject_color_idx_map = {}
+        color_idx = 0
+        for subject in subjects:
+            if subject.kind == "other":
+                self.subject_color_map[subject.id] = SUBJECT_COLOR_OTHER
+                self.subject_color_idx_map[subject.id] = -1
+            else:
+                self.subject_color_map[subject.id] = SUBJECT_COLORS[color_idx % len(SUBJECT_COLORS)]
+                self.subject_color_idx_map[subject.id] = color_idx % len(SUBJECT_COLORS)
+                color_idx += 1
+
         self.subject_menu.clear()
         selected_subject = subjects[0]
         for subject in subjects:
@@ -756,8 +865,13 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             action.setChecked(subject.id == self.selected_subject_id)
             action.triggered.connect(lambda _checked=False, subject_id=subject.id: self.select_subject(subject_id))
-        self.subject_button.setText("과목")
+
+        color = self.subject_color_map.get(selected_subject.id, SUBJECT_COLORS[0])
+        self.subject_button.setText(selected_subject.name)
         self.subject_button.setToolTip(f"선택된 과목: {selected_subject.name}")
+        self.subject_button.setStyleSheet(
+            f"background-color: {color['bg']}; border: 1px solid {color['border']}; color: {color['text']};"
+        )
 
     def select_subject(self, subject_id: int) -> None:
         self.selected_subject_id = subject_id
@@ -774,17 +888,43 @@ class MainWindow(QMainWindow):
             self.todo_list.addItem(item)
             self.todo_list.setItemWidget(item, self.create_todo_item_widget(todo))
 
+        if hasattr(self, "selected_todo_label"):
+            if self.selected_todo_id and self.selected_todo_id in self.todo_lookup:
+                todo = self.todo_lookup[self.selected_todo_id]
+                color = self.subject_color_map.get(todo.subject_id, SUBJECT_COLORS[0])
+                self.selected_todo_label.setText(f"▶  {todo.subject_name}  |  {todo.title}")
+                self.selected_todo_label.setStyleSheet(
+                    f"color: {color['text']}; font-weight: 800; font-size: 13px;"
+                )
+            else:
+                self.selected_todo_label.setText("선택된 할 일 없음")
+                self.selected_todo_label.setStyleSheet("")
+
     def todo_item_height(self, todo) -> int:
         title_lines = max(1, (len(todo.title) + 20) // 21)
         meta_lines = max(1, (len(todo.subject_name) + len(todo.status) + 16) // 30)
         return min(150, 52 + title_lines * 22 + meta_lines * 18)
 
     def create_todo_item_widget(self, todo) -> QWidget:
+        color = self.subject_color_map.get(todo.subject_id, SUBJECT_COLORS[0])
+        is_selected = todo.id == self.selected_todo_id
+
         frame = QFrame()
         frame.setObjectName("TodoItemWidget")
         frame.setAttribute(Qt.WA_TransparentForMouseEvents)
+        if is_selected:
+            frame.setStyleSheet(
+                f"background-color: {color['bg']};"
+                f"border-left: 4px solid {color['text']};"
+                f"border-radius: 10px;"
+            )
+        else:
+            frame.setStyleSheet(
+                f"background-color: transparent;"
+                f"border-left: 3px solid {color['border']};"
+            )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(10, 12, 10, 12)
+        layout.setContentsMargins(12, 12, 10, 12)
         layout.setSpacing(6)
 
         title_row = QHBoxLayout()
@@ -826,12 +966,18 @@ class MainWindow(QMainWindow):
             todo = self.todo_lookup.get(blocks.get(key))
             if not todo:
                 button.set_task_text("")
+                button.set_subject_color(None)
                 button.setProperty("filled", False)
                 button.setProperty("life", False)
+                button.setProperty("color_idx", "")
             else:
+                color = self.subject_color_map.get(todo.subject_id)
+                cidx = self.subject_color_idx_map.get(todo.subject_id, -1)
                 button.set_task_text(f"{todo.subject_name}\n{todo.title}")
+                button.set_subject_color(color)
                 button.setProperty("filled", True)
                 button.setProperty("life", todo.subject_kind == "other")
+                button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
             button.setProperty("selected", key == self.selected_block_key)
             button.style().unpolish(button)
             button.style().polish(button)
@@ -842,9 +988,13 @@ class MainWindow(QMainWindow):
         todo = self.todo_lookup.get(todo_id)
         if not button or not todo:
             return
+        color = self.subject_color_map.get(todo.subject_id)
+        cidx = self.subject_color_idx_map.get(todo.subject_id, -1)
         button.set_task_text(f"{todo.subject_name}\n{todo.title}")
+        button.set_subject_color(color)
         button.setProperty("filled", True)
         button.setProperty("life", todo.subject_kind == "other")
+        button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
         button.setProperty("selected", block_key == self.selected_block_key)
         button.style().unpolish(button)
         button.style().polish(button)
