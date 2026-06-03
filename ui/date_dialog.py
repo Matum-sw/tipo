@@ -1,4 +1,4 @@
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QCalendarWidget,
     QDialog,
@@ -35,8 +35,11 @@ class DateDialog(QDialog):
         self.calendar = QCalendarWidget()
         self.calendar.setObjectName("DateCalendar")
         self.calendar.setGridVisible(False)
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.NoVerticalHeader)
+        self.calendar.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
         self.calendar.setSelectedDate(selected_date)
         self.calendar.activated.connect(self.accept)
+        self.calendar.setStyleSheet(self._calendar_style())
         root.addWidget(self.calendar, 1)
 
         actions = QHBoxLayout()
@@ -53,6 +56,65 @@ class DateDialog(QDialog):
         actions.addWidget(today_button)
         actions.addWidget(apply_button)
         root.addLayout(actions)
+
+    @staticmethod
+    def _calendar_style() -> str:
+        return """
+            QCalendarWidget {
+                background: #ffffff;
+                border: 1px solid #dce8fb;
+                border-radius: 16px;
+            }
+            QCalendarWidget QWidget#qt_calendar_navigationbar {
+                background: #f4f8ff;
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                padding: 6px 8px;
+            }
+            QCalendarWidget QToolButton {
+                background: transparent;
+                color: #2c3950;
+                font-size: 14px;
+                font-weight: 700;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 10px;
+                min-width: 28px;
+            }
+            QCalendarWidget QToolButton:hover {
+                background: #e8f1ff;
+                color: #1f5fcf;
+            }
+            QCalendarWidget QToolButton#qt_calendar_prevmonth,
+            QCalendarWidget QToolButton#qt_calendar_nextmonth {
+                font-size: 16px;
+                font-weight: 900;
+                color: #4a7bd8;
+            }
+            QCalendarWidget QSpinBox {
+                background: #ffffff;
+                border: 1px solid #dce8fb;
+                border-radius: 8px;
+                padding: 2px 6px;
+                color: #2c3950;
+                font-weight: 700;
+                min-width: 56px;
+            }
+            QCalendarWidget QAbstractItemView {
+                background: #ffffff;
+                selection-background-color: #3f7df1;
+                selection-color: #ffffff;
+                color: #2c3950;
+                font-size: 13px;
+                outline: none;
+            }
+            QCalendarWidget QAbstractItemView:enabled {
+                color: #2c3950;
+            }
+            QCalendarWidget QAbstractItemView:disabled {
+                color: #c0c8d8;
+            }
+        """
 
     def select_today(self) -> None:
         self.calendar.setSelectedDate(QDate.currentDate())
