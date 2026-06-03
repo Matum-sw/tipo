@@ -1,11 +1,11 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
@@ -17,7 +17,7 @@ class SubjectDialog(QDialog):
         self.store = store
         self.setWindowTitle("학기 과목 등록")
         self.setModal(True)
-        self.setMinimumSize(520, 560)
+        self.setMinimumSize(480, 500)
         self.setObjectName("SubjectDialog")
         self.build()
         self.refresh()
@@ -39,13 +39,11 @@ class SubjectDialog(QDialog):
         form = QHBoxLayout()
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("예: 자료구조")
-        self.difficulty = QComboBox()
-        self.difficulty.addItems(["쉬움", "보통", "어려움"])
+        self.name_input.returnPressed.connect(self.add_subject)
         self.add_button = QPushButton("추가")
         self.add_button.setObjectName("PrimaryButton")
         self.add_button.clicked.connect(self.add_subject)
         form.addWidget(self.name_input, 1)
-        form.addWidget(self.difficulty)
         form.addWidget(self.add_button)
         root.addLayout(form)
 
@@ -54,6 +52,7 @@ class SubjectDialog(QDialog):
 
         actions = QHBoxLayout()
         self.delete_button = QPushButton("선택 삭제")
+        self.delete_button.setObjectName("DangerButton")
         self.delete_button.clicked.connect(self.delete_selected)
         self.start_button = QPushButton("플래너 시작")
         self.start_button.setObjectName("PrimaryButton")
@@ -66,13 +65,13 @@ class SubjectDialog(QDialog):
     def refresh(self) -> None:
         self.list_widget.clear()
         for subject in self.store.subjects(include_other=False):
-            self.list_widget.addItem(f"{subject.name}  ·  {subject.difficulty}")
+            self.list_widget.addItem(subject.name)
 
     def add_subject(self) -> None:
         name = self.name_input.text().strip()
         if not name:
             return
-        self.store.add_subject(name, self.difficulty.currentText())
+        self.store.add_subject(name)
         self.name_input.clear()
         self.refresh()
 
@@ -80,7 +79,22 @@ class SubjectDialog(QDialog):
         row = self.list_widget.currentRow()
         if row < 0:
             return
-        subject = self.store.subjects(include_other=False)[row]
+        subjects = self.store.subjects(include_other=False)
+        if row >= len(subjects):
+            return
+        subject = subjects[row]
+        todos = self.store.todos_for_subject(subject.id)
+        if todos:
+            msg = (
+                f"'{subject.name}' 과목에 할 일이 {len(todos)}개 있습니다.\n"
+                "과목을 삭제하면 연결된 모든 할 일과 타이머 기록도 함께 삭제됩니다.\n"
+                "계속하시겠습니까?"
+            )
+        else:
+            msg = f"'{subject.name}' 과목을 삭제하시겠습니까?"
+        reply = QMessageBox.question(self, "과목 삭제", msg, QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
         self.store.delete_subject(subject.id)
         self.refresh()
 

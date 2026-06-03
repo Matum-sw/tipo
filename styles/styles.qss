@@ -217,6 +217,15 @@ QPushButton:hover {
   background: #d63f44;
 }
 
+#CompleteButton {
+  background: #2f9e44;
+  color: #ffffff;
+}
+
+#CompleteButton:hover {
+  background: #27883a;
+}
+
 #TimerValue {
   font-size: 44px;
   font-weight: 900;

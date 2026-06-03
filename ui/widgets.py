@@ -16,6 +16,81 @@ from PySide6.QtWidgets import (
 )
 
 
+class DonutChartWidget(QWidget):
+    """총 공부시간 / 총 작동시간 도넛 그래프 (배경=24시간 회색)."""
+
+    DAY_SECONDS = 86400
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.focus_seconds = 0
+        self.active_seconds = 0
+        self.setMinimumSize(140, 140)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_data(self, focus_seconds: int, active_seconds: int) -> None:
+        self.focus_seconds = max(0, focus_seconds)
+        self.active_seconds = max(0, active_seconds)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        size = min(self.width(), self.height()) - 4
+        cx = self.width() / 2
+        cy = self.height() / 2
+        ring = size * 0.18           # 링 두께
+        r = (size - ring) / 2        # 중심~링 중간선
+
+        rect = QRectF(cx - r, cy - r, r * 2, r * 2)
+
+        pen = QPen()
+        pen.setWidthF(ring)
+        pen.setCapStyle(Qt.FlatCap)
+
+        # 1. 회색 배경 (24시간)
+        pen.setColor(QColor("#e4e9f2"))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(rect)
+
+        # 2. 총 작동시간 (연한 파랑)
+        active_angle = min(360, int(self.active_seconds / self.DAY_SECONDS * 360))
+        if active_angle > 0:
+            pen.setColor(QColor("#93c5fd"))
+            painter.setPen(pen)
+            painter.drawArc(rect, 90 * 16, -active_angle * 16)
+
+        # 3. 총 공부시간 (진한 파랑), 위에 겹침
+        focus_angle = min(360, int(self.focus_seconds / self.DAY_SECONDS * 360))
+        if focus_angle > 0:
+            pen.setColor(QColor("#3f7df1"))
+            painter.setPen(pen)
+            painter.drawArc(rect, 90 * 16, -focus_angle * 16)
+
+        # 4. 중앙 텍스트 (공부시간)
+        focus_min = self.focus_seconds // 60
+        fh, fm = divmod(focus_min, 60)
+        line1 = f"{fh}h {fm}m" if fh else f"{fm}분"
+        active_min = self.active_seconds // 60
+        ah, am = divmod(active_min, 60)
+        line2 = f"/{ah}h {am}m" if ah else f"/{am}분"
+
+        font1 = QFont(self.font())
+        font1.setPointSize(11)
+        font1.setBold(True)
+        painter.setFont(font1)
+        painter.setPen(QColor("#1d2738"))
+        painter.drawText(QRectF(cx - r, cy - r * 0.5, r * 2, r * 0.9), Qt.AlignCenter, line1)
+
+        font2 = QFont(self.font())
+        font2.setPointSize(8)
+        painter.setFont(font2)
+        painter.setPen(QColor("#738095"))
+        painter.drawText(QRectF(cx - r, cy + r * 0.05, r * 2, r * 0.7), Qt.AlignCenter, line2)
+
+
 class Card(QFrame):
     def __init__(self, title: str = "", subtitle: str = "", parent=None):
         super().__init__(parent)
@@ -122,12 +197,15 @@ class TimeGridWidget(QWidget):
 class TimeMarkerOverlay(QWidget):
     def paintEvent(self, event) -> None:
         grid = self.parent()
-        if not grid or not grid.is_today():
+        if not grid:
             return
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         self.draw_timer_segments(painter, grid)
+
+        if not grid.is_today():
+            return
 
         now = datetime.now()
         first = grid.block_buttons.get(f"{now.hour:02d}:00")
@@ -170,6 +248,8 @@ class TimeMarkerOverlay(QWidget):
                 color = QColor("#34c759")
             elif segment["mode"] == "break":
                 color = QColor("#f5c542")
+            elif segment["mode"] == "long_break":
+                color = QColor("#af87ff")
             else:
                 color = QColor("#ff5b5b")
             color.setAlpha(92)

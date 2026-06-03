@@ -1,4 +1,3 @@
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -74,12 +73,9 @@ class TodoAddDialog(QDialog):
 
         # 하단 버튼
         actions = QHBoxLayout()
-        delete_btn = QPushButton("선택 삭제")
-        delete_btn.clicked.connect(self._delete_selected)
         done_btn = QPushButton("완료")
         done_btn.setObjectName("PrimaryButton")
         done_btn.clicked.connect(self.accept)
-        actions.addWidget(delete_btn)
         actions.addStretch(1)
         actions.addWidget(done_btn)
         root.addLayout(actions)
@@ -128,11 +124,3 @@ class TodoAddDialog(QDialog):
         for t in reversed(todos):
             self.list_widget.addItem(f"{t.subject_name}  ·  {t.title}")
 
-    def _delete_selected(self) -> None:
-        row = self.list_widget.currentRow()
-        if row < 0:
-            return
-        todos = list(reversed(self.store.todos_for_day(self.day)))
-        if row < len(todos):
-            self.store.delete_todo(todos[row].id)
-            self._refresh_todos()
