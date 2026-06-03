@@ -307,5 +307,19 @@ class SQLiteStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def reset_all_data(self) -> None:
+        """모든 사용자 데이터 삭제 (과목·설정 제외, 기타 카테고리 유지)."""
+        self.connection.executescript(
+            """
+            DELETE FROM timer_records;
+            DELETE FROM time_blocks;
+            DELETE FROM brain_dumps;
+            DELETE FROM todos;
+            DELETE FROM subjects WHERE kind = 'subject';
+            """
+        )
+        self.connection.commit()
+        self.ensure_other_category()
+
     def today(self) -> str:
         return date.today().isoformat()

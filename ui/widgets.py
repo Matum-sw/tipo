@@ -291,8 +291,7 @@ class TimeBlockButton(QPushButton):
         self.setMouseTracking(True)
         self.setObjectName("TimeBlock")
         self.setProperty("filled", False)
-        self.setMinimumHeight(28)
-        self.setMaximumHeight(40)
+        self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_task_text(self, text: str) -> None:

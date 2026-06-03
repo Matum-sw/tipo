@@ -32,7 +32,7 @@ from ui.stats_dialog import SubjectStatsDialog
 from ui.subject_dialog import SubjectDialog
 from ui.todo_add_dialog import TodoAddDialog
 from ui.todo_edit_dialog import TodoEditDialog
-from ui.widgets import Card, DonutChartWidget, Pill, TimeBlockButton, TimeGridWidget, TimelineHeader
+from ui.widgets import Card, DonutChartWidget, TimeBlockButton, TimeGridWidget, TimelineHeader
 
 
 HOURS = list(range(24))
@@ -122,6 +122,29 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self._load_timer_config()
             self._apply_alarm_volume()
+            self._apply_theme()
+        if dlg.data_reset:
+            self.store.reset_all_data()
+            self._db_segments_dirty = True
+            self.selected_todo_id = None
+            self.selected_block_key = None
+            self.pomodoro_history = []
+            if self.running:
+                self.tick.stop()
+                self.running = None
+            self.refresh_all()
+            if not self.store.has_real_subjects():
+                SubjectDialog(self.store, self).exec()
+                self.refresh_all()
+
+    def _apply_theme(self) -> None:
+        dark_mode = self.store.get_setting("dark_mode", "0") == "1"
+        dark_file = ROOT_DIR / "styles" / "dark.qss"
+        light_file = ROOT_DIR / "styles" / "styles.qss"
+        qss_file = dark_file if dark_mode and dark_file.exists() else light_file
+        app = QApplication.instance()
+        if app and qss_file.exists():
+            app.setStyleSheet(qss_file.read_text(encoding="utf-8"))
 
     # ── UI 빌드 ───────────────────────────────────────────────────────────────
 
@@ -196,7 +219,7 @@ class MainWindow(QMainWindow):
         title_lbl.setObjectName("CardTitle")
         self.add_button = QPushButton("추가")
         self.add_button.setObjectName("PrimaryButton")
-        self.add_button.setStyleSheet("padding: 4px 12px; min-height: 0;")
+        self.add_button.setStyleSheet("padding: 4px 12px; min-height: 0; border-radius: 8px;")
         self.add_button.setToolTip("할 일 추가 (더블클릭으로 편집)")
         self.add_button.clicked.connect(self.open_add_todo_dialog)
         header.addWidget(title_lbl, 1)
@@ -211,7 +234,7 @@ class MainWindow(QMainWindow):
         self.todo_list = QListWidget()
         self.todo_list.setWordWrap(True)
         self.todo_list.itemClicked.connect(self.select_todo)
-        self.todo_list.itemDoubleClicked.connect(self.open_todo_edit_dialog)
+        self.todo_list.viewport().installEventFilter(self)
         card.layout.addWidget(self.todo_list, 1)
 
     def build_brain_card(self, parent) -> None:
@@ -235,11 +258,11 @@ class MainWindow(QMainWindow):
         self.delete_mode_button = QPushButton("추가 모드")
         self.delete_mode_button.setObjectName("SoftButton")
         self.delete_mode_button.setCheckable(True)
-        self.delete_mode_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
+        self.delete_mode_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 8px;")
         self.delete_mode_button.clicked.connect(self.toggle_delete_mode)
         clear_all_button = QPushButton("전체 삭제")
         clear_all_button.setObjectName("DangerButton")
-        clear_all_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
+        clear_all_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 8px;")
         clear_all_button.clicked.connect(self.clear_all_blocks)
         plan_actions.addWidget(self.selected_block_label, 1)
         plan_actions.addWidget(self.delete_mode_button)
@@ -254,7 +277,7 @@ class MainWindow(QMainWindow):
 
         self.time_grid_widget = TimeGridWidget(lambda: self.day)
         self.time_grid_widget.setObjectName("TimeGrid")
-        self.time_grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.time_grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.time_grid = QGridLayout(self.time_grid_widget)
         self.time_grid.setHorizontalSpacing(0)
         self.time_grid.setVerticalSpacing(0)
@@ -264,14 +287,18 @@ class MainWindow(QMainWindow):
         self.time_grid.addWidget(TimelineHeader(), 0, 1, 1, len(MINUTES))
         self.time_grid.setRowMinimumHeight(0, 38)
 
+        _ROW_H = 34  # 균일 행 높이 (픽셀)
+
         for row, hour in enumerate(HOURS, start=1):
             hour_label = QLabel(f"{hour:02d}")
             hour_label.setObjectName("HourLabel")
             hour_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
             self.time_grid.addWidget(hour_label, row, 0)
+            self.time_grid.setRowMinimumHeight(row, _ROW_H)
             for column, minute in enumerate(MINUTES, start=1):
                 key = f"{hour:02d}:{minute:02d}"
                 button = TimeBlockButton(key)
+                button.setFixedHeight(_ROW_H)
                 if column == 1:
                     button.setProperty("segment", "first")
                 elif column == len(MINUTES):
@@ -289,15 +316,17 @@ class MainWindow(QMainWindow):
         end_label.setObjectName("HourLabel")
         end_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.time_grid.addWidget(end_label, len(HOURS) + 1, 0)
+        self.time_grid.setRowMinimumHeight(len(HOURS) + 1, 22)
 
         self.time_grid.setColumnStretch(0, 0)
         self.time_grid.setColumnMinimumWidth(0, 26)
         for column in range(1, len(MINUTES) + 1):
             self.time_grid.setColumnStretch(column, 1)
-        self.time_grid.setRowStretch(0, 0)
-        for row in range(1, len(HOURS) + 1):
-            self.time_grid.setRowStretch(row, 1)
-        self.time_grid.setRowStretch(len(HOURS) + 1, 0)
+            self.time_grid.setColumnMinimumWidth(column, 0)
+
+        # 고정 높이 계산: 상하 여백(8) + 헤더(38) + 데이터 행(24 × _ROW_H) + 말미 행(22)
+        _grid_fixed_h = 8 + 38 + len(HOURS) * _ROW_H + 22
+        self.time_grid_widget.setFixedHeight(_grid_fixed_h)
 
         self.plan_scroll.setWidget(self.time_grid_widget)
         self.time_grid_widget.set_block_buttons(self.block_buttons)
@@ -322,16 +351,16 @@ class MainWindow(QMainWindow):
         card.layout.addWidget(self.pomodoro_visual)
 
         actions = QHBoxLayout()
-        self.cancel_button = QPushButton("취소")
-        self.cancel_button.setObjectName("GhostButton")
-        self.cancel_button.clicked.connect(self.cancel_timer_session)
+        self.exit_button = QPushButton("종료")
+        self.exit_button.setObjectName("GhostButton")
+        self.exit_button.clicked.connect(self.exit_timer_session)
         self.pause_button = QPushButton("실행")
         self.pause_button.setObjectName("PrimaryButton")
         self.pause_button.clicked.connect(self.toggle_timer)
         self.complete_button = QPushButton("완료")
         self.complete_button.setObjectName("CompleteButton")
         self.complete_button.clicked.connect(self.complete_timer_session)
-        actions.addWidget(self.cancel_button)
+        actions.addWidget(self.exit_button)
         actions.addWidget(self.pause_button)
         actions.addWidget(self.complete_button)
         card.layout.addLayout(actions)
@@ -388,21 +417,7 @@ class MainWindow(QMainWindow):
         legend_row.addStretch(1)
         card.layout.addLayout(legend_row)
 
-        # 생활 일정 등 나머지 stats
-        stats_scroll = QScrollArea()
-        stats_scroll.setWidgetResizable(True)
-        stats_scroll.setObjectName("StatsScroll")
-        stats_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        stats_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-
-        stats_widget = QWidget()
-        stats_widget.setObjectName("StatsList")
-        self.stats_container = QVBoxLayout()
-        self.stats_container.setContentsMargins(0, 0, 0, 0)
-        self.stats_container.setSpacing(8)
-        stats_widget.setLayout(self.stats_container)
-        stats_scroll.setWidget(stats_widget)
-        card.layout.addWidget(stats_scroll, 1)
+        card.layout.addStretch(1)
 
         report_actions = QHBoxLayout()
         subject_stats_btn = QPushButton("과목별 공부시간")
@@ -675,11 +690,17 @@ class MainWindow(QMainWindow):
             self.refresh_todos()
             self.prepare_timer(todo_id, block_key)
 
-        if self.running["mode"] in {"focus", "break", "long_break"}:
-            previous_mode = self.running["mode"]
+        mode = self.running["mode"]
+        if mode in {"break", "long_break"}:
+            # 휴식 건너뛰기
+            self.skip_break()
+            return
+
+        if mode == "focus":
+            # 집중 일시정지
             self.finish_current_timer_segment()
             self.running["mode"] = "paused"
-            self.running["paused_from"] = previous_mode
+            self.running["paused_from"] = "focus"
             self.running["segment_started_at"] = time.time()
             self.pause_button.setText("실행")
             self.pause_button.setObjectName("PrimaryButton")
@@ -704,10 +725,8 @@ class MainWindow(QMainWindow):
         self.tick.start(1000)
         if mode == "focus":
             self.pause_button.setText("일시정지")
-        elif mode == "break":
-            self.pause_button.setText("휴식 일시정지")
-        else:
-            self.pause_button.setText("긴 휴식 일시정지")
+        else:  # break / long_break
+            self.pause_button.setText("건너뛰기")
         self.pause_button.setObjectName("DangerButton")
         self.repolish(self.pause_button)
         self.update_timer()
@@ -817,54 +836,36 @@ class MainWindow(QMainWindow):
             if self.running["focus_alert_shown"]:
                 return
             self.running["focus_alert_shown"] = True
-            self.play_alarm()
-            self.show_timer_alert(
-                "집중 시간 종료",
-                f"{self.focus_seconds // 60}분 집중 시간이 끝났습니다. 확인을 누르면 {self.break_seconds // 60}분 휴식이 시작됩니다.",
-                "break",
-            )
             self.finish_current_timer_segment()
-            self.start_timer_segment("break")
+            self.play_alarm()
+            # 마지막 스프린트면 5분 휴식 없이 바로 긴 휴식
+            if self.running["sprint_in_set"] >= self.sprint_count:
+                self.record_completed_sprint()
+                self.start_timer_segment("long_break")
+            else:
+                self.start_timer_segment("break")
 
         elif mode == "break" and self.segment_elapsed_seconds("break") >= self.break_seconds:
             if self.running["break_alert_shown"]:
                 return
             self.running["break_alert_shown"] = True
             self.finish_current_timer_segment()
-            sprint_num = self.running["sprint_in_set"]
+            self.play_alarm()
             self.record_completed_sprint()
-            if self.running["sprint_in_set"] > self.sprint_count:
-                self.play_alarm()
-                self.show_timer_alert(
-                    "세트 완료",
-                    f"{self.sprint_count}개 스프린트 완료! {self.long_break_seconds // 60}분 긴 휴식이 시작됩니다.",
-                    "long_break",
-                )
-                self.start_timer_segment("long_break")
-            else:
-                self.play_alarm()
-                QMessageBox.information(
-                    self, "휴식 종료",
-                    f"스프린트 {sprint_num}/{self.sprint_count} 완료.\n실행 버튼을 눌러 다음 스프린트를 시작하세요.",
-                )
-                self.running["mode"] = "idle"
-                self.tick.stop()
-                self.pause_button.setText("실행")
-                self.pause_button.setObjectName("PrimaryButton")
-                self.repolish(self.pause_button)
+            # 다음 스프린트 대기
+            self.running["mode"] = "idle"
+            self.tick.stop()
+            self.pause_button.setText("실행")
+            self.pause_button.setObjectName("PrimaryButton")
+            self.repolish(self.pause_button)
 
         elif mode == "long_break" and self.segment_elapsed_seconds("long_break") >= self.long_break_seconds:
             if self.running.get("long_break_alert_shown"):
                 return
             self.running["long_break_alert_shown"] = True
             self.finish_current_timer_segment()
-            set_done = self.running["set_number"]
-            self.record_completed_set()
             self.play_alarm()
-            QMessageBox.information(
-                self, "세트 완료",
-                f"{set_done}세트 완료! 실행 버튼을 눌러 {set_done + 1}세트를 시작하세요.",
-            )
+            self.record_completed_set()
             self.running["mode"] = "idle"
             self.tick.stop()
             self.pause_button.setText("실행")
@@ -980,7 +981,41 @@ class MainWindow(QMainWindow):
             active = self.active_timer_segments()
             self.time_grid_widget.set_timer_segments(saved + active)
 
+    def skip_break(self) -> None:
+        """휴식(break/long_break) 건너뛰기 - 기록 저장 후 idle로 전환."""
+        if not self.running:
+            return
+        mode = self.running["mode"]
+        if mode not in {"break", "long_break"}:
+            return
+        self.finish_current_timer_segment()
+        if mode == "break":
+            self.record_completed_sprint()
+        else:
+            self.record_completed_set()
+        self.running["mode"] = "idle"
+        self.tick.stop()
+        self.pause_button.setText("실행")
+        self.pause_button.setObjectName("PrimaryButton")
+        self.repolish(self.pause_button)
+        self.update_timer()
+
+    def exit_timer_session(self) -> None:
+        """종료: 지금까지 기록 저장 후 타이머 초기화."""
+        if not self.running:
+            return
+        reply = QMessageBox.question(
+            self,
+            "종료 확인",
+            "타이머를 종료하시겠습니까?\n지금까지의 기록은 저장됩니다.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._force_stop_timer()
+
     def cancel_timer_session(self) -> None:
+        """내부 사용 전용 (확인 팝업 포함 취소)."""
         if not self.running:
             return
         reply = QMessageBox.question(
@@ -1041,6 +1076,16 @@ class MainWindow(QMainWindow):
         if self.running:
             self._force_stop_timer()
         event.accept()
+
+    def eventFilter(self, obj, event) -> bool:
+        from PySide6.QtCore import QEvent
+        if obj is self.todo_list.viewport() and event.type() == QEvent.MouseButtonDblClick:
+            if event.button() == Qt.LeftButton:
+                item = self.todo_list.itemAt(event.position().toPoint())
+                if item:
+                    self.open_todo_edit_dialog(item)
+            return True
+        return super().eventFilter(obj, event)
 
     def repolish(self, widget) -> None:
         widget.style().unpolish(widget)
@@ -1244,7 +1289,6 @@ class MainWindow(QMainWindow):
 
     def refresh_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)
-        life_total = 0
         focus_total = 0
         active_total = 0
 
@@ -1253,8 +1297,6 @@ class MainWindow(QMainWindow):
             if et == "focus":
                 focus_total += record["seconds"]
                 active_total += record["seconds"]
-                if record["subject_kind"] == "other":
-                    life_total += record["seconds"]
             elif et in {"break", "long_break"}:
                 active_total += record["seconds"]
 
@@ -1272,10 +1314,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "focus_time_label"):
             self.focus_time_label.setText(fmt(focus_total) if focus_total else "—")
 
-        # stats_container: 생활 일정만 표시
-        self.clear_layout(self.stats_container)
-        life_text = f"생활 일정  {fmt(life_total)}" if life_total else "생활 일정  —"
-        self.stats_container.addWidget(Pill(life_text, "green"))
 
     def show_subject_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)

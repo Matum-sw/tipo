@@ -109,7 +109,7 @@ class TodoEditDialog(QDialog):
         self._refresh_subject_menu()
 
     def _status_label(self) -> str:
-        return "✓ 완료됨  (클릭하여 미완료로)" if self._status == "done" else "○ 미완료  (클릭하여 완료로)"
+        return "✓ 완료됨  (클릭하여 미완료)" if self._status == "done" else "○ 미완료  (클릭하여 완료)"
 
     def _status_obj_name(self) -> str:
         return "CompleteButton" if self._status == "done" else "SoftButton"
