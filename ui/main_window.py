@@ -31,6 +31,7 @@ from ui.settings_dialog import SettingsDialog
 from ui.stats_dialog import SubjectStatsDialog
 from ui.subject_dialog import SubjectDialog
 from ui.todo_add_dialog import TodoAddDialog
+from ui.todo_edit_dialog import TodoEditDialog
 from ui.widgets import Card, DonutChartWidget, Pill, TimeBlockButton, TimeGridWidget, TimelineHeader
 
 
@@ -196,16 +197,10 @@ class MainWindow(QMainWindow):
         self.add_button = QPushButton("추가")
         self.add_button.setObjectName("PrimaryButton")
         self.add_button.setStyleSheet("padding: 4px 12px; min-height: 0;")
-        self.add_button.setToolTip("할 일 추가")
+        self.add_button.setToolTip("할 일 추가 (더블클릭으로 편집)")
         self.add_button.clicked.connect(self.open_add_todo_dialog)
-        self.delete_todo_button = QPushButton("삭제")
-        self.delete_todo_button.setObjectName("DangerButton")
-        self.delete_todo_button.setStyleSheet("padding: 4px 12px; min-height: 0;")
-        self.delete_todo_button.setToolTip("선택 항목 삭제")
-        self.delete_todo_button.clicked.connect(self.delete_selected_todo)
         header.addWidget(title_lbl, 1)
         header.addWidget(self.add_button)
-        header.addWidget(self.delete_todo_button)
         card.layout.addLayout(header)
 
         self.selected_todo_label = QLabel("선택된 할 일 없음")
@@ -213,15 +208,10 @@ class MainWindow(QMainWindow):
         self.selected_todo_label.setWordWrap(True)
         card.layout.addWidget(self.selected_todo_label)
 
-        hint = QLabel("더블클릭으로 완료/미완료 전환")
-        hint.setObjectName("MutedText")
-        hint.setStyleSheet("font-size: 11px;")
-        card.layout.addWidget(hint)
-
         self.todo_list = QListWidget()
         self.todo_list.setWordWrap(True)
         self.todo_list.itemClicked.connect(self.select_todo)
-        self.todo_list.itemDoubleClicked.connect(self.toggle_todo_done)
+        self.todo_list.itemDoubleClicked.connect(self.open_todo_edit_dialog)
         card.layout.addWidget(self.todo_list, 1)
 
     def build_brain_card(self, parent) -> None:
@@ -333,7 +323,7 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("취소")
-        self.cancel_button.setObjectName("DangerButton")
+        self.cancel_button.setObjectName("GhostButton")
         self.cancel_button.clicked.connect(self.cancel_timer_session)
         self.pause_button = QPushButton("실행")
         self.pause_button.setObjectName("PrimaryButton")
@@ -350,20 +340,47 @@ class MainWindow(QMainWindow):
         card = Card("Study Stats")
         parent.addWidget(card, 1)
 
-        # 도넛 그래프
-        self.donut_chart = DonutChartWidget()
-        self.donut_chart.setFixedHeight(160)
-        card.layout.addWidget(self.donut_chart)
+        # 도넛 + 시간 정보 가로 배치
+        top_row = QHBoxLayout()
+        top_row.setSpacing(16)
 
-        # 범례
+        self.donut_chart = DonutChartWidget()
+        self.donut_chart.setFixedSize(130, 130)
+        top_row.addWidget(self.donut_chart)
+
+        # 오른쪽: 타이머 작동 시간 (위), 공부 시간 (아래)
+        time_col = QVBoxLayout()
+        time_col.setSpacing(8)
+        time_col.addStretch(1)
+
+        active_title = QLabel("타이머 작동 시간")
+        active_title.setStyleSheet("color: #738095; font-size: 11px; font-weight: 700;")
+        self.active_time_label = QLabel("—")
+        self.active_time_label.setStyleSheet("color: #4a7bd8; font-size: 17px; font-weight: 800;")
+
+        focus_title = QLabel("공부 시간")
+        focus_title.setStyleSheet("color: #738095; font-size: 11px; font-weight: 700;")
+        self.focus_time_label = QLabel("—")
+        self.focus_time_label.setStyleSheet("color: #3f7df1; font-size: 17px; font-weight: 800;")
+
+        time_col.addWidget(active_title)
+        time_col.addWidget(self.active_time_label)
+        time_col.addSpacing(6)
+        time_col.addWidget(focus_title)
+        time_col.addWidget(self.focus_time_label)
+        time_col.addStretch(1)
+        top_row.addLayout(time_col, 1)
+        card.layout.addLayout(top_row)
+
+        # 범례: 공부 먼저, 타이머, 24h
         legend_row = QHBoxLayout()
         legend_row.setSpacing(12)
         dot1 = QLabel("● 공부")
-        dot1.setStyleSheet("color: #3f7df1; font-size: 12px; font-weight: 700;")
-        dot2 = QLabel("● 작동")
-        dot2.setStyleSheet("color: #93c5fd; font-size: 12px; font-weight: 700;")
+        dot1.setStyleSheet("color: #3f7df1; font-size: 11px; font-weight: 700;")
+        dot2 = QLabel("● 타이머")
+        dot2.setStyleSheet("color: #93c5fd; font-size: 11px; font-weight: 700;")
         dot3 = QLabel("● 24h")
-        dot3.setStyleSheet("color: #c8d0de; font-size: 12px; font-weight: 700;")
+        dot3.setStyleSheet("color: #c8d0de; font-size: 11px; font-weight: 700;")
         legend_row.addStretch(1)
         legend_row.addWidget(dot1)
         legend_row.addWidget(dot2)
@@ -371,6 +388,7 @@ class MainWindow(QMainWindow):
         legend_row.addStretch(1)
         card.layout.addLayout(legend_row)
 
+        # 생활 일정 등 나머지 stats
         stats_scroll = QScrollArea()
         stats_scroll.setWidgetResizable(True)
         stats_scroll.setObjectName("StatsScroll")
@@ -381,7 +399,7 @@ class MainWindow(QMainWindow):
         stats_widget.setObjectName("StatsList")
         self.stats_container = QVBoxLayout()
         self.stats_container.setContentsMargins(0, 0, 0, 0)
-        self.stats_container.setSpacing(10)
+        self.stats_container.setSpacing(8)
         stats_widget.setLayout(self.stats_container)
         stats_scroll.setWidget(stats_widget)
         card.layout.addWidget(stats_scroll, 1)
@@ -391,11 +409,13 @@ class MainWindow(QMainWindow):
         subject_stats_btn.setObjectName("SoftButton")
         subject_stats_btn.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
         subject_stats_btn.clicked.connect(self.show_subject_stats)
-        report_button = QPushButton("Markdown 리포트")
+        report_button = QPushButton("Markdown")
         report_button.setObjectName("PrimaryButton")
+        report_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
         report_button.clicked.connect(self.generate_report)
         ai_button = QPushButton("AI 피드백")
         ai_button.setObjectName("GhostButton")
+        ai_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
         ai_button.clicked.connect(self.show_ai_feedback)
         report_actions.addWidget(subject_stats_btn)
         report_actions.addWidget(report_button)
@@ -414,14 +434,27 @@ class MainWindow(QMainWindow):
         self.selected_todo_id = item.data(Qt.UserRole)
         self.refresh_todos()
 
-    def toggle_todo_done(self, item: QListWidgetItem) -> None:
+    def open_todo_edit_dialog(self, item: QListWidgetItem) -> None:
         todo_id = item.data(Qt.UserRole)
         todo = self.todo_lookup.get(todo_id)
         if not todo:
             return
-        new_status = "open" if todo.status == "done" else "done"
-        self.store.set_todo_status(todo_id, new_status)
-        self.refresh_todos()
+        dlg = TodoEditDialog(self.store, todo, self.subject_color_map, self)
+        dlg.exec()
+        if dlg.deleted:
+            if self.running and self.running["todo_id"] == todo_id:
+                reply = QMessageBox.question(
+                    self, "타이머 실행 중",
+                    "이 할 일의 타이머가 실행 중입니다. 취소하고 삭제하시겠습니까?",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                if reply != QMessageBox.Yes:
+                    return
+                self._force_cancel_timer()
+            self.store.delete_todo(todo_id)
+            if self.selected_todo_id == todo_id:
+                self.selected_todo_id = None
+        self.refresh_all()
 
     def delete_selected_todo(self) -> None:
         if not self.selected_todo_id:
@@ -1210,9 +1243,7 @@ class MainWindow(QMainWindow):
         button.style().polish(button)
 
     def refresh_stats(self) -> None:
-        self.clear_layout(self.stats_container)
         records = self.store.timer_records_for_day(self.day)
-        totals: dict[str, int] = defaultdict(int)
         life_total = 0
         focus_total = 0
         active_total = 0
@@ -1224,8 +1255,6 @@ class MainWindow(QMainWindow):
                 active_total += record["seconds"]
                 if record["subject_kind"] == "other":
                     life_total += record["seconds"]
-                else:
-                    totals[record["subject_name"]] += record["seconds"]
             elif et in {"break", "long_break"}:
                 active_total += record["seconds"]
 
@@ -1235,22 +1264,18 @@ class MainWindow(QMainWindow):
 
         def fmt(s: int) -> str:
             h, m = divmod(s // 60, 60)
-            return f"{h}시간 {m}분" if h else f"{m}분"
+            return f"{h}h {m}m" if h else f"{m}분"
 
-        if focus_total > 0 or active_total > 0:
-            self.stats_container.addWidget(Pill(f"총 공부시간  {fmt(focus_total)}", "blue"))
-            self.stats_container.addWidget(Pill(f"총 작동시간  {fmt(active_total)}", "green"))
+        # 시간 레이블 업데이트
+        if hasattr(self, "active_time_label"):
+            self.active_time_label.setText(fmt(active_total) if active_total else "—")
+        if hasattr(self, "focus_time_label"):
+            self.focus_time_label.setText(fmt(focus_total) if focus_total else "—")
 
-        if not totals:
-            empty = QLabel("오늘 저장된 공부 시간이 아직 없습니다.")
-            empty.setObjectName("MutedText")
-            empty.setWordWrap(True)
-            self.stats_container.addWidget(empty)
-        else:
-            for subject, seconds in sorted(totals.items(), key=lambda x: x[1], reverse=True):
-                self.stats_container.addWidget(Pill(f"{subject} · {round(seconds / 60)}분", "blue"))
-
-        self.stats_container.addWidget(Pill(f"생활 일정 {round(life_total / 60)}분", "green"))
+        # stats_container: 생활 일정만 표시
+        self.clear_layout(self.stats_container)
+        life_text = f"생활 일정  {fmt(life_total)}" if life_total else "생활 일정  —"
+        self.stats_container.addWidget(Pill(life_text, "green"))
 
     def show_subject_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)

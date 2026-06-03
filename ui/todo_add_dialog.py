@@ -69,6 +69,13 @@ class TodoAddDialog(QDialog):
 
         # 추가된 할 일 목록
         self.list_widget = QListWidget()
+        self.list_widget.setStyleSheet("""
+            QListWidget::item { border-radius: 8px; padding: 6px 8px; margin: 2px; }
+            QListWidget::item:selected, QListWidget::item:selected:active {
+                background: #dbeafe; color: #1f5fcf; border-radius: 8px;
+            }
+            QListWidget::item:hover { background: #f0f6ff; border-radius: 8px; }
+        """)
         root.addWidget(self.list_widget, 1)
 
         # 하단 버튼

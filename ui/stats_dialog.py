@@ -131,7 +131,7 @@ class SubjectStatsDialog(QDialog):
         title.setObjectName("DialogTitle")
         root.addWidget(title)
 
-        hint = QLabel("X축: 0 ~ 24시간  ·  더블클릭으로 닫기")
+        hint = QLabel("더블클릭으로 닫기")
         hint.setObjectName("MutedText")
         root.addWidget(hint)
 
