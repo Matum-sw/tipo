@@ -324,7 +324,9 @@ QScrollBar:horizontal {
   color: #647086;
   font-weight: 700;
   text-align: left;
-  padding: 7px;
+  padding: 4px 7px;
+  min-height: 0;
+  max-height: 9999px;
 }
 
 #TimeBlock[segment="first"] {

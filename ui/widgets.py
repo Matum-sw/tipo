@@ -33,15 +33,24 @@ class DonutChartWidget(QWidget):
         self.active_seconds = max(0, active_seconds)
         self.update()
 
+    def _is_dark(self) -> bool:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if not app:
+            return False
+        ss = app.styleSheet()
+        return "#141927" in ss or "#1a2030" in ss
+
     def paintEvent(self, event) -> None:
+        dark = self._is_dark()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
         size = min(self.width(), self.height()) - 4
         cx = self.width() / 2
         cy = self.height() / 2
-        ring = size * 0.18           # 링 두께
-        r = (size - ring) / 2        # 중심~링 중간선
+        ring = size * 0.18
+        r = (size - ring) / 2
 
         rect = QRectF(cx - r, cy - r, r * 2, r * 2)
 
@@ -50,26 +59,26 @@ class DonutChartWidget(QWidget):
         pen.setCapStyle(Qt.FlatCap)
 
         # 1. 회색 배경 (24시간)
-        pen.setColor(QColor("#e4e9f2"))
+        pen.setColor(QColor("#2a3650" if dark else "#e4e9f2"))
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(rect)
 
-        # 2. 총 작동시간 (연한 파랑)
+        # 2. 총 작동시간
         active_angle = min(360, int(self.active_seconds / self.DAY_SECONDS * 360))
         if active_angle > 0:
-            pen.setColor(QColor("#93c5fd"))
+            pen.setColor(QColor("#3a78c8" if dark else "#93c5fd"))
             painter.setPen(pen)
             painter.drawArc(rect, 90 * 16, -active_angle * 16)
 
-        # 3. 총 공부시간 (진한 파랑), 위에 겹침
+        # 3. 총 공부시간 (위에 겹침)
         focus_angle = min(360, int(self.focus_seconds / self.DAY_SECONDS * 360))
         if focus_angle > 0:
-            pen.setColor(QColor("#3f7df1"))
+            pen.setColor(QColor("#5a9aff" if dark else "#3f7df1"))
             painter.setPen(pen)
             painter.drawArc(rect, 90 * 16, -focus_angle * 16)
 
-        # 4. 중앙 텍스트 (공부시간)
+        # 4. 중앙 텍스트
         focus_min = self.focus_seconds // 60
         fh, fm = divmod(focus_min, 60)
         line1 = f"{fh}h {fm}m" if fh else f"{fm}분"
@@ -81,13 +90,13 @@ class DonutChartWidget(QWidget):
         font1.setPointSize(11)
         font1.setBold(True)
         painter.setFont(font1)
-        painter.setPen(QColor("#1d2738"))
+        painter.setPen(QColor("#e8edf8" if dark else "#1d2738"))
         painter.drawText(QRectF(cx - r, cy - r * 0.5, r * 2, r * 0.9), Qt.AlignCenter, line1)
 
         font2 = QFont(self.font())
         font2.setPointSize(8)
         painter.setFont(font2)
-        painter.setPen(QColor("#738095"))
+        painter.setPen(QColor("#7a8799" if dark else "#738095"))
         painter.drawText(QRectF(cx - r, cy + r * 0.05, r * 2, r * 0.7), Qt.AlignCenter, line2)
 
 
@@ -135,13 +144,22 @@ class TimelineHeader(QWidget):
         self.setFixedHeight(38)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
+    def _is_dark(self) -> bool:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if not app:
+            return False
+        ss = app.styleSheet()
+        return "#141927" in ss or "#1a2030" in ss
+
     def paintEvent(self, event) -> None:
+        dark = self._is_dark()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
         rect = self.rect().adjusted(2, 17, -2, -6)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#e8f1ff"))
+        painter.setBrush(QColor("#1e2840" if dark else "#e8f1ff"))
         painter.drawRoundedRect(QRectF(rect), 5, 5)
 
         font = QFont(self.font())
@@ -149,11 +167,13 @@ class TimelineHeader(QWidget):
         font.setBold(True)
         painter.setFont(font)
 
+        tick_color = QColor("#3a5080" if dark else "#b6c7df")
+        label_color = QColor("#5a6880" if dark else "#93a0b4")
         for minute in range(0, 61, 10):
             x = rect.left() + (rect.width() * minute / 60)
-            painter.setPen(QPen(QColor("#b6c7df"), 1))
+            painter.setPen(QPen(tick_color, 1))
             painter.drawLine(int(x), rect.top() - 4, int(x), rect.bottom())
-            painter.setPen(QColor("#93a0b4"))
+            painter.setPen(label_color)
             label = f"{minute:02d}"
             painter.drawText(QRectF(x - 16, 0, 32, 16), Qt.AlignCenter, label)
 
@@ -195,11 +215,20 @@ class TimeGridWidget(QWidget):
 
 
 class TimeMarkerOverlay(QWidget):
+    def _is_dark(self) -> bool:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if not app:
+            return False
+        ss = app.styleSheet()
+        return "#141927" in ss or "#1a2030" in ss
+
     def paintEvent(self, event) -> None:
         grid = self.parent()
         if not grid:
             return
 
+        dark = self._is_dark()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         self.draw_timer_segments(painter, grid)
@@ -220,11 +249,12 @@ class TimeMarkerOverlay(QWidget):
         y1 = first.y()
         y2 = first.y() + first.height()
 
-        painter.setPen(QPen(QColor("#2f7df6"), 3))
+        line_color = QColor("#5a9aff" if dark else "#2f7df6")
+        painter.setPen(QPen(line_color, 3))
         painter.drawLine(int(x), y1, int(x), y2)
 
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#2f7df6"))
+        painter.setBrush(line_color)
         painter.drawEllipse(QRectF(x - 5, y1 - 5, 10, 10))
 
         font = QFont(self.font())

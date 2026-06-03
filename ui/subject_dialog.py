@@ -48,13 +48,22 @@ class SubjectDialog(QDialog):
         root.addLayout(form)
 
         self.list_widget = QListWidget()
-        self.list_widget.setStyleSheet("""
+        _dark = self.store.get_setting("dark_mode", "0") == "1"
+        self.list_widget.setStyleSheet(
+            """
+            QListWidget::item { border-radius: 8px; padding: 8px 10px; margin: 2px; color: #dde4f0; }
+            QListWidget::item:selected, QListWidget::item:selected:active {
+                background: #1e3a5f; color: #7baeff; border-radius: 8px; font-weight: 800;
+            }
+            QListWidget::item:hover { background: #1a2840; border-radius: 8px; }
+            """ if _dark else """
             QListWidget::item { border-radius: 8px; padding: 8px 10px; margin: 2px; }
             QListWidget::item:selected, QListWidget::item:selected:active {
                 background: #dbeafe; color: #1f5fcf; border-radius: 8px; font-weight: 800;
             }
             QListWidget::item:hover { background: #f0f6ff; border-radius: 8px; }
-        """)
+            """
+        )
         root.addWidget(self.list_widget, 1)
 
         actions = QHBoxLayout()

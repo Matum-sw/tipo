@@ -53,6 +53,18 @@ SUBJECT_COLORS = [
 ]
 SUBJECT_COLOR_OTHER = {"bg": "#eff8ed", "border": "#cfeac9", "text": "#477d37"}
 
+# 다크 모드 전용 과목 색상 (배경 어둡게, 텍스트 밝게)
+SUBJECT_COLORS_DARK = [
+    {"bg": "#1a2c4a", "border": "#2a4880", "text": "#7baeff"},  # 0: blue
+    {"bg": "#261a4a", "border": "#432880", "text": "#c07aff"},  # 1: purple
+    {"bg": "#3a2010", "border": "#603818", "text": "#ff9050"},  # 2: orange
+    {"bg": "#3a1230", "border": "#602050", "text": "#ff7ab0"},  # 3: pink
+    {"bg": "#102a20", "border": "#1a4838", "text": "#50cc80"},  # 4: teal
+    {"bg": "#2a2a10", "border": "#484818", "text": "#cccc40"},  # 5: yellow-green
+    {"bg": "#3a1010", "border": "#601818", "text": "#ff6060"},  # 6: red
+]
+SUBJECT_COLOR_OTHER_DARK = {"bg": "#162810", "border": "#2a4820", "text": "#60c870"}
+
 
 class MainWindow(QMainWindow):
     def __init__(self, store):
@@ -136,6 +148,9 @@ class MainWindow(QMainWindow):
             if not self.store.has_real_subjects():
                 SubjectDialog(self.store, self).exec()
                 self.refresh_all()
+
+    def _is_dark_mode(self) -> bool:
+        return self.store.get_setting("dark_mode", "0") == "1"
 
     def _apply_theme(self) -> None:
         dark_mode = self.store.get_setting("dark_mode", "0") == "1"
@@ -279,15 +294,16 @@ class MainWindow(QMainWindow):
         self.time_grid_widget.setObjectName("TimeGrid")
         self.time_grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.time_grid = QGridLayout(self.time_grid_widget)
+        _ROW_H = 34      # 균일 행 높이 (픽셀)
+        _V_GAP  = 1      # 행 간격 (픽셀) — 칸이 서로 겹치지 않도록
+
         self.time_grid.setHorizontalSpacing(0)
-        self.time_grid.setVerticalSpacing(0)
+        self.time_grid.setVerticalSpacing(_V_GAP)
         self.time_grid.setContentsMargins(4, 4, 4, 4)
 
         self.time_grid.addWidget(QLabel(""), 0, 0)
         self.time_grid.addWidget(TimelineHeader(), 0, 1, 1, len(MINUTES))
         self.time_grid.setRowMinimumHeight(0, 38)
-
-        _ROW_H = 34  # 균일 행 높이 (픽셀)
 
         for row, hour in enumerate(HOURS, start=1):
             hour_label = QLabel(f"{hour:02d}")
@@ -324,8 +340,10 @@ class MainWindow(QMainWindow):
             self.time_grid.setColumnStretch(column, 1)
             self.time_grid.setColumnMinimumWidth(column, 0)
 
-        # 고정 높이 계산: 상하 여백(8) + 헤더(38) + 데이터 행(24 × _ROW_H) + 말미 행(22)
-        _grid_fixed_h = 8 + 38 + len(HOURS) * _ROW_H + 22
+        # 고정 높이: 상하 여백(8) + 헤더(38) + 데이터행(24×ROW_H) + 말미행(22)
+        #           + 행 간격 25개 (26개 행 사이 25개 간격)
+        _NUM_ROWS = 1 + len(HOURS) + 1  # header + data + end = 26
+        _grid_fixed_h = 8 + 38 + len(HOURS) * _ROW_H + 22 + (_NUM_ROWS - 1) * _V_GAP
         self.time_grid_widget.setFixedHeight(_grid_fixed_h)
 
         self.plan_scroll.setWidget(self.time_grid_widget)
@@ -1154,16 +1172,20 @@ class MainWindow(QMainWindow):
         if self.selected_subject_id is None or not any(s.id == self.selected_subject_id for s in subjects):
             self.selected_subject_id = subjects[0].id
 
+        dark = self._is_dark_mode()
+        colors = SUBJECT_COLORS_DARK if dark else SUBJECT_COLORS
+        color_other = SUBJECT_COLOR_OTHER_DARK if dark else SUBJECT_COLOR_OTHER
+
         self.subject_color_map = {}
         self.subject_color_idx_map = {}
         color_idx = 0
         for subject in subjects:
             if subject.kind == "other":
-                self.subject_color_map[subject.id] = SUBJECT_COLOR_OTHER
+                self.subject_color_map[subject.id] = color_other
                 self.subject_color_idx_map[subject.id] = -1
             else:
-                self.subject_color_map[subject.id] = SUBJECT_COLORS[color_idx % len(SUBJECT_COLORS)]
-                self.subject_color_idx_map[subject.id] = color_idx % len(SUBJECT_COLORS)
+                self.subject_color_map[subject.id] = colors[color_idx % len(colors)]
+                self.subject_color_idx_map[subject.id] = color_idx % len(colors)
                 color_idx += 1
 
         if not any(s.id == self.selected_subject_id for s in subjects):
