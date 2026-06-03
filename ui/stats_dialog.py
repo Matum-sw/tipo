@@ -131,10 +131,6 @@ class SubjectStatsDialog(QDialog):
         title.setObjectName("DialogTitle")
         root.addWidget(title)
 
-        hint = QLabel("더블클릭으로 닫기")
-        hint.setObjectName("MutedText")
-        root.addWidget(hint)
-
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setObjectName("StatsScroll")
@@ -143,9 +139,6 @@ class SubjectStatsDialog(QDialog):
         chart.setMinimumHeight(chart.sizeHint().height())
         scroll.setWidget(chart)
         root.addWidget(scroll, 1)
-
-    def mouseDoubleClickEvent(self, event) -> None:
-        self.accept()
 
     @staticmethod
     def _aggregate(records, subject_color_map, subject_color_idx_map,

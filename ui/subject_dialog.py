@@ -70,7 +70,7 @@ class SubjectDialog(QDialog):
         self.delete_button = QPushButton("선택 삭제")
         self.delete_button.setObjectName("DangerButton")
         self.delete_button.clicked.connect(self.delete_selected)
-        self.start_button = QPushButton("플래너 시작")
+        self.start_button = QPushButton("완료")
         self.start_button.setObjectName("PrimaryButton")
         self.start_button.clicked.connect(self.accept_if_ready)
         actions.addWidget(self.delete_button)

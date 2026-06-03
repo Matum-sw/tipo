@@ -135,6 +135,10 @@ class MainWindow(QMainWindow):
             self._load_timer_config()
             self._apply_alarm_volume()
             self._apply_theme()
+            # 테마 전환 후 과목 색상 맵 및 UI 즉시 재빌드
+            self.refresh_subjects()
+            self.refresh_todos()
+            self.refresh_blocks()
         if dlg.data_reset:
             self.store.reset_all_data()
             self._db_segments_dirty = True
