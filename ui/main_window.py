@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from core.openai_feedback import AIFeedbackService
 from core.paths import APP_NAME, ROOT_DIR
-from core.reporting import build_markdown_report, save_markdown_report
+from core.reporting import build_ai_coaching_prompt, build_markdown_report, save_markdown_report
 from ui.date_dialog import DateDialog
 from ui.settings_dialog import SettingsDialog
 from ui.stats_dialog import SubjectStatsDialog
@@ -462,6 +462,7 @@ class MainWindow(QMainWindow):
     # ── Todo ──────────────────────────────────────────────────────────────────
 
     def open_add_todo_dialog(self) -> None:
+        self.log_event("todo_add_opened", subject_id=self.selected_subject_id)
         dialog = TodoAddDialog(self.store, self.day, self.selected_subject_id, self.subject_color_map, self)
         dialog.exec()
         self.selected_subject_id = dialog.selected_subject_id
@@ -469,6 +470,12 @@ class MainWindow(QMainWindow):
 
     def select_todo(self, item: QListWidgetItem) -> None:
         self.selected_todo_id = item.data(Qt.UserRole)
+        todo = self.todo_lookup.get(self.selected_todo_id)
+        self.log_event(
+            "todo_selected",
+            todo_id=self.selected_todo_id,
+            subject_id=todo.subject_id if todo else None,
+        )
         self.refresh_todos()
 
     def open_todo_edit_dialog(self, item: QListWidgetItem) -> None:
@@ -476,6 +483,7 @@ class MainWindow(QMainWindow):
         todo = self.todo_lookup.get(todo_id)
         if not todo:
             return
+        self.log_event("todo_edit_opened", todo_id=todo.id, subject_id=todo.subject_id)
         dlg = TodoEditDialog(self.store, todo, self.subject_color_map, self)
         dlg.exec()
         if dlg.deleted:
@@ -489,6 +497,7 @@ class MainWindow(QMainWindow):
                     return
                 self._force_cancel_timer()
             self.store.delete_todo(todo_id)
+            self.log_event("todo_deleted", todo_id=todo_id, subject_id=todo.subject_id)
             if self.selected_todo_id == todo_id:
                 self.selected_todo_id = None
         self.refresh_all()
@@ -507,7 +516,13 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
             self._force_cancel_timer()
+        todo = self.todo_lookup.get(self.selected_todo_id)
         self.store.delete_todo(self.selected_todo_id)
+        self.log_event(
+            "todo_deleted",
+            todo_id=self.selected_todo_id,
+            subject_id=todo.subject_id if todo else None,
+        )
         self.selected_todo_id = None
         self.selected_block_key = None
         self.refresh_all()
@@ -575,6 +590,7 @@ class MainWindow(QMainWindow):
         self.drag_visited_blocks = set()
 
         if was_delete_mode:
+            self.log_event("block_erased", block_key=last_block_key, metadata={"block_count": visited_count})
             return
 
         self.refresh_blocks()
@@ -583,6 +599,15 @@ class MainWindow(QMainWindow):
             self.selected_todo_id = todo_id
             self.set_selected_block(last_block_key)
             self.refresh_todos()
+        if todo_id:
+            todo = self.todo_lookup.get(todo_id)
+            self.log_event(
+                "block_assigned",
+                todo_id=todo_id,
+                subject_id=todo.subject_id if todo else None,
+                block_key=last_block_key,
+                metadata={"block_count": visited_count},
+            )
 
     def paint_todo_to_block(self, block_key: str) -> None:
         if not self.drag_todo_id:
@@ -630,6 +655,7 @@ class MainWindow(QMainWindow):
 
     def toggle_delete_mode(self) -> None:
         self.delete_mode = self.delete_mode_button.isChecked()
+        self.log_event("delete_mode_toggled", metadata={"enabled": self.delete_mode})
         if self.delete_mode:
             self.delete_mode_button.setText("삭제 모드")
             self.delete_mode_button.setObjectName("DangerButton")
@@ -649,6 +675,7 @@ class MainWindow(QMainWindow):
             if self.running:
                 self._force_stop_timer()
             self.store.clear_unprotected_blocks_for_day(self.day)
+            self.log_event("blocks_cleared")
             self.selected_block_key = None
             self.update_selected_block_label()
             self.refresh_blocks()
@@ -699,6 +726,7 @@ class MainWindow(QMainWindow):
         self.pause_button.setText("실행")
         self.pause_button.setObjectName("PrimaryButton")
         self.repolish(self.pause_button)
+        self.log_event("timer_prepared", todo_id=todo_id, subject_id=todo.subject_id, block_key=block_key)
         self.update_timer()
 
     def toggle_timer(self) -> None:
@@ -724,6 +752,12 @@ class MainWindow(QMainWindow):
             self.running["mode"] = "paused"
             self.running["paused_from"] = "focus"
             self.running["segment_started_at"] = time.time()
+            self.log_event(
+                "timer_paused",
+                todo_id=self.running["todo_id"],
+                subject_id=self.running["subject_id"],
+                block_key=self.running["block_key"],
+            )
             self.pause_button.setText("실행")
             self.pause_button.setObjectName("PrimaryButton")
             self.repolish(self.pause_button)
@@ -751,6 +785,13 @@ class MainWindow(QMainWindow):
             self.pause_button.setText("건너뛰기")
         self.pause_button.setObjectName("DangerButton")
         self.repolish(self.pause_button)
+        self.log_event(
+            "timer_started",
+            todo_id=self.running["todo_id"],
+            subject_id=self.running["subject_id"],
+            block_key=self.running["block_key"],
+            metadata={"mode": mode},
+        )
         self.update_timer()
 
     def finish_current_timer_segment(self) -> None:
@@ -1020,6 +1061,13 @@ class MainWindow(QMainWindow):
         self.pause_button.setText("실행")
         self.pause_button.setObjectName("PrimaryButton")
         self.repolish(self.pause_button)
+        self.log_event(
+            "break_skipped",
+            todo_id=self.running["todo_id"],
+            subject_id=self.running["subject_id"],
+            block_key=self.running["block_key"],
+            metadata={"mode": mode},
+        )
         self.update_timer()
 
     def exit_timer_session(self) -> None:
@@ -1053,6 +1101,13 @@ class MainWindow(QMainWindow):
     def _force_cancel_timer(self) -> None:
         if not self.running:
             return
+        self.log_event(
+            "timer_cancelled",
+            todo_id=self.running["todo_id"],
+            subject_id=self.running["subject_id"],
+            block_key=self.running["block_key"],
+            metadata={"mode": self.running["mode"]},
+        )
         self.tick.stop()
         self.store.delete_timer_records_by_memo(self.running["session_id"])
         self._db_segments_dirty = True
@@ -1068,17 +1123,36 @@ class MainWindow(QMainWindow):
         """완료: 기록 저장 + 할 일 완료 처리."""
         if not self.running:
             if self.selected_todo_id:
+                todo = self.todo_lookup.get(self.selected_todo_id)
                 self.store.set_todo_status(self.selected_todo_id, "done")
+                self.log_event(
+                    "todo_completed",
+                    todo_id=self.selected_todo_id,
+                    subject_id=todo.subject_id if todo else None,
+                )
                 self.refresh_todos()
             return
         self._force_stop_timer()
         if self.selected_todo_id:
+            todo = self.todo_lookup.get(self.selected_todo_id)
             self.store.set_todo_status(self.selected_todo_id, "done")
+            self.log_event(
+                "todo_completed",
+                todo_id=self.selected_todo_id,
+                subject_id=todo.subject_id if todo else None,
+            )
         self.refresh_all()
 
     def _force_stop_timer(self) -> None:
         if not self.running:
             return
+        self.log_event(
+            "timer_stopped",
+            todo_id=self.running["todo_id"],
+            subject_id=self.running["subject_id"],
+            block_key=self.running["block_key"],
+            metadata={"mode": self.running["mode"]},
+        )
         if self.running["mode"] in {"focus", "break", "long_break", "paused"}:
             self.finish_current_timer_segment()
         self.tick.stop()
@@ -1114,6 +1188,19 @@ class MainWindow(QMainWindow):
         widget.style().polish(widget)
         widget.update()
 
+    def log_event(
+        self,
+        event_type: str,
+        todo_id: int | None = None,
+        subject_id: int | None = None,
+        block_key: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        try:
+            self.store.add_event_log(self.day, event_type, todo_id, subject_id, block_key, metadata)
+        except Exception:
+            pass
+
     def save_brain_dump(self) -> None:
         if hasattr(self, "brain_dump"):
             self.store.save_brain_dump(self.day, self.brain_dump.toPlainText())
@@ -1121,10 +1208,12 @@ class MainWindow(QMainWindow):
     def change_date(self, qdate: QDate) -> None:
         if self.running:
             self._force_stop_timer()
+        previous_day = self.day
         self.day = qdate.toString("yyyy-MM-dd")
         self.selected_todo_id = None
         self.pomodoro_history = []
         self._db_segments_dirty = True
+        self.log_event("date_changed", metadata={"from": previous_day, "to": self.day})
         self.update_date_button()
         self.set_selected_block(None)
         self.refresh_all()
@@ -1354,17 +1443,49 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def generate_report(self) -> str:
+        self.log_event("report_generated")
+        todos = self.store.todos_for_day(self.day)
+        records = self.store.timer_records_for_day(self.day)
+        notes = self.store.brain_dump(self.day)
         markdown = build_markdown_report(
             self.day,
-            self.store.todos_for_day(self.day),
-            self.store.timer_records_for_day(self.day),
-            self.store.brain_dump(self.day),
+            todos,
+            records,
+            notes,
         )
         path = save_markdown_report(self.day, markdown)
-        QMessageBox.information(self, "리포트 생성", f"Markdown 리포트를 생성했습니다.\n{path}")
+
+        days = self.store.activity_days(limit=14)
+        if self.day not in days:
+            days.insert(0, self.day)
+        events = self.store.event_logs_for_days(days)
+        events_by_day = defaultdict(list)
+        for event in events:
+            events_by_day[event["day"]].append(event)
+        snapshots = [
+            {
+                "day": day,
+                "todos": self.store.todos_for_day(day),
+                "records": self.store.timer_records_for_day(day),
+                "blocks": self.store.blocks_for_day(day),
+                "notes": self.store.brain_dump(day),
+                "events": events_by_day.get(day, []),
+            }
+            for day in days
+        ]
+        prompt = build_ai_coaching_prompt(self.day, snapshots)
+        QApplication.clipboard().setText(prompt)
+
+        QMessageBox.information(
+            self,
+            "리포트 생성",
+            "Markdown 리포트를 생성하고, GPT 붙여넣기용 개인화 피드백 프롬프트를 복사했습니다.\n"
+            f"{path}",
+        )
         return markdown
 
     def show_ai_feedback(self) -> None:
+        self.log_event("ai_feedback_clicked")
         markdown = build_markdown_report(
             self.day,
             self.store.todos_for_day(self.day),
