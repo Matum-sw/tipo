@@ -33,6 +33,7 @@ class SQLiteStore:
                 title TEXT NOT NULL,
                 subject_id INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
+                planned_minutes INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(subject_id) REFERENCES subjects(id)
             );
@@ -85,6 +86,13 @@ class SQLiteStore:
             """
         )
         self.connection.commit()
+        self._ensure_column("todos", "planned_minutes", "INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        existing = {row["name"] for row in self.connection.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            self.connection.commit()
 
     def now(self) -> str:
         return datetime.now().isoformat(timespec="seconds")
@@ -181,6 +189,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """
             SELECT todos.id, todos.day, todos.title, todos.subject_id, todos.status,
+                   todos.planned_minutes,
                    subjects.name AS subject_name, subjects.kind AS subject_kind
             FROM todos
             JOIN subjects ON subjects.id = todos.subject_id
@@ -212,7 +221,20 @@ class SQLiteStore:
 
     # ── Time Blocks ───────────────────────────────────────────────────────────
 
+    def _recalculate_planned_minutes(self, todo_id: int) -> None:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS count FROM time_blocks WHERE todo_id = ?", (todo_id,)
+        ).fetchone()
+        self.connection.execute(
+            "UPDATE todos SET planned_minutes = ? WHERE id = ?",
+            (row["count"] * 10, todo_id),
+        )
+
     def assign_block(self, day: str, block_key: str, todo_id: int) -> None:
+        previous = self.connection.execute(
+            "SELECT todo_id FROM time_blocks WHERE day = ? AND block_key = ?", (day, block_key)
+        ).fetchone()
+        previous_todo_id = previous["todo_id"] if previous else None
         self.connection.execute(
             """
             INSERT INTO time_blocks(day, block_key, todo_id)
@@ -221,29 +243,49 @@ class SQLiteStore:
             """,
             (day, block_key, todo_id),
         )
+        if previous_todo_id is not None and previous_todo_id != todo_id:
+            self._recalculate_planned_minutes(previous_todo_id)
+        self._recalculate_planned_minutes(todo_id)
         self.connection.commit()
 
     def delete_block(self, day: str, block_key: str) -> None:
+        previous = self.connection.execute(
+            "SELECT todo_id FROM time_blocks WHERE day = ? AND block_key = ?", (day, block_key)
+        ).fetchone()
         self.connection.execute(
             "DELETE FROM time_blocks WHERE day = ? AND block_key = ?", (day, block_key)
         )
+        if previous:
+            self._recalculate_planned_minutes(previous["todo_id"])
         self.connection.commit()
 
     def clear_blocks_for_day(self, day: str) -> None:
+        todo_ids = [
+            row["todo_id"]
+            for row in self.connection.execute(
+                "SELECT DISTINCT todo_id FROM time_blocks WHERE day = ?", (day,)
+            ).fetchall()
+        ]
         self.connection.execute("DELETE FROM time_blocks WHERE day = ?", (day,))
+        for todo_id in todo_ids:
+            self._recalculate_planned_minutes(todo_id)
         self.connection.commit()
 
     def clear_unprotected_blocks_for_day(self, day: str) -> None:
         """블록 시간대에 타이머가 실제로 작동한 블록만 보호하고 나머지 삭제."""
         blocks = self.connection.execute(
-            "SELECT block_key FROM time_blocks WHERE day = ?", (day,)
+            "SELECT block_key, todo_id FROM time_blocks WHERE day = ?", (day,)
         ).fetchall()
+        affected_todo_ids = set()
         for block in blocks:
             if not self.block_has_timer_records(day, block["block_key"]):
                 self.connection.execute(
                     "DELETE FROM time_blocks WHERE day = ? AND block_key = ?",
                     (day, block["block_key"]),
                 )
+                affected_todo_ids.add(block["todo_id"])
+        for todo_id in affected_todo_ids:
+            self._recalculate_planned_minutes(todo_id)
         self.connection.commit()
 
     def block_has_timer_records(self, day: str, block_key: str) -> bool:

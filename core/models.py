@@ -18,3 +18,4 @@ class Todo:
     subject_name: str
     subject_kind: str
     status: str
+    planned_minutes: int = 0

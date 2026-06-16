@@ -409,12 +409,12 @@ class MainWindow(QMainWindow):
         active_title = QLabel("타이머 작동 시간")
         active_title.setStyleSheet("color: #738095; font-size: 11px; font-weight: 700;")
         self.active_time_label = QLabel("—")
-        self.active_time_label.setStyleSheet("color: #4a7bd8; font-size: 17px; font-weight: 800;")
+        self.active_time_label.setStyleSheet("color: #3f7df1; font-size: 17px; font-weight: 800;")
 
-        focus_title = QLabel("공부 시간")
+        focus_title = QLabel("계획 시간")
         focus_title.setStyleSheet("color: #738095; font-size: 11px; font-weight: 700;")
         self.focus_time_label = QLabel("—")
-        self.focus_time_label.setStyleSheet("color: #3f7df1; font-size: 17px; font-weight: 800;")
+        self.focus_time_label.setStyleSheet("color: #4a7bd8; font-size: 17px; font-weight: 800;")
 
         time_col.addWidget(active_title)
         time_col.addWidget(self.active_time_label)
@@ -428,10 +428,10 @@ class MainWindow(QMainWindow):
         # 범례: 공부 먼저, 타이머, 24h
         legend_row = QHBoxLayout()
         legend_row.setSpacing(12)
-        dot1 = QLabel("● 공부")
-        dot1.setStyleSheet("color: #3f7df1; font-size: 11px; font-weight: 700;")
+        dot1 = QLabel("● 계획")
+        dot1.setStyleSheet("color: #93c5fd; font-size: 11px; font-weight: 700;")
         dot2 = QLabel("● 타이머")
-        dot2.setStyleSheet("color: #93c5fd; font-size: 11px; font-weight: 700;")
+        dot2.setStyleSheet("color: #3f7df1; font-size: 11px; font-weight: 700;")
         dot3 = QLabel("● 24h")
         dot3.setStyleSheet("color: #c8d0de; font-size: 11px; font-weight: 700;")
         legend_row.addStretch(1)
@@ -588,9 +588,13 @@ class MainWindow(QMainWindow):
 
         if was_delete_mode:
             self.log_event("block_erased", block_key=last_block_key, metadata={"block_count": visited_count})
+            self.refresh_todos()
+            self.refresh_stats()
             return
 
         self.refresh_blocks()
+        self.refresh_todos()
+        self.refresh_stats()
 
         if visited_count == 1 and todo_id:
             self.selected_todo_id = todo_id
@@ -676,6 +680,8 @@ class MainWindow(QMainWindow):
             self.selected_block_key = None
             self.update_selected_block_label()
             self.refresh_blocks()
+            self.refresh_todos()
+            self.refresh_stats()
 
     def set_selected_block(self, block_key: str | None) -> None:
         previous = self.selected_block_key
@@ -1552,7 +1558,10 @@ class MainWindow(QMainWindow):
 
     def todo_item_height(self, todo) -> int:
         title_lines = max(1, (len(todo.title) + 20) // 21)
-        meta_lines = max(1, (len(todo.subject_name) + len(todo.status) + 16) // 30)
+        meta_length = len(todo.subject_name) + len(todo.status) + 16
+        if todo.planned_minutes:
+            meta_length += len(str(todo.planned_minutes)) + 8
+        meta_lines = max(1, meta_length // 30)
         return min(150, 52 + title_lines * 22 + meta_lines * 18)
 
     def create_todo_item_widget(self, todo) -> QWidget:
@@ -1587,7 +1596,10 @@ class MainWindow(QMainWindow):
             check.setFixedWidth(24)
             title_row.addWidget(check)
 
-        meta = QLabel(f"{todo.subject_name} · {self.status_label(todo.status)}")
+        meta_text = f"{todo.subject_name} · {self.status_label(todo.status)}"
+        if todo.planned_minutes:
+            meta_text += f" · 계획 {todo.planned_minutes}분"
+        meta = QLabel(meta_text)
         meta.setObjectName("TodoItemMeta")
         meta.setWordWrap(True)
         meta.setMinimumHeight(22)
@@ -1644,20 +1656,18 @@ class MainWindow(QMainWindow):
 
     def refresh_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)
-        focus_total = 0
         active_total = 0
 
         for record in records:
             et = record["event_type"]
-            if et == "focus":
-                focus_total += record["seconds"]
+            if et in {"focus", "break", "long_break"}:
                 active_total += record["seconds"]
-            elif et in {"break", "long_break"}:
-                active_total += record["seconds"]
+
+        scheduled_total = sum(todo.planned_minutes for todo in self.todo_lookup.values()) * 60
 
         # 도넛 그래프 업데이트
         if hasattr(self, "donut_chart"):
-            self.donut_chart.set_data(focus_total, active_total)
+            self.donut_chart.set_data(scheduled_total, active_total)
 
         def fmt(s: int) -> str:
             h, m = divmod(s // 60, 60)
@@ -1667,7 +1677,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "active_time_label"):
             self.active_time_label.setText(fmt(active_total) if active_total else "—")
         if hasattr(self, "focus_time_label"):
-            self.focus_time_label.setText(fmt(focus_total) if focus_total else "—")
+            self.focus_time_label.setText(fmt(scheduled_total) if scheduled_total else "—")
 
 
     def show_subject_stats(self) -> None:
@@ -1772,6 +1782,7 @@ class MainWindow(QMainWindow):
             changed = self.apply_realistic_schedule(proposal, context)
             self.log_event("realistic_schedule_applied", metadata={"changed_blocks": changed})
             self.refresh_blocks()
+            self.refresh_todos()
             self.refresh_stats()
             QMessageBox.information(
                 self,
