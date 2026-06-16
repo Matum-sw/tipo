@@ -1,3 +1,4 @@
 PySide6>=6.7
 openai>=1.0
 pyinstaller>=6.0
+python scripts\seed_sample_usage.py
