@@ -2321,11 +2321,10 @@ class MainWindow(QMainWindow):
 
         compressed_patch = self.compressed_schedule_patch(context, max_changes=max_changes)
         if compressed_patch:
-            schedule.extend(compressed_patch)
             return {
                 "summary": proposal.get("summary") or "최근 기록 기준으로 과밀한 시간표를 현실적인 분량으로 압축했습니다.",
                 "realistic_reason": proposal.get("realistic_reason") or self.schedule_baseline_reason(context),
-                "schedule": schedule,
+                "schedule": compressed_patch,
             }
 
         for alert in context.get("schedule_alerts", []):
