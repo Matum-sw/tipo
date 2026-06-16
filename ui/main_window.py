@@ -1595,7 +1595,15 @@ class MainWindow(QMainWindow):
         )
         completion_rate = round(history_done_todos / history_total_todos * 100) if history_total_todos else 0
         focus_vs_plan_rate = round(history_focus_minutes / history_planned_minutes * 100) if history_planned_minutes else 0
-        target_planned_blocks = round(average_planned_blocks * max(0.5, focus_vs_plan_rate / 100)) if average_planned_blocks else 0
+        max_planned_blocks_with_buffer = round(average_planned_blocks * 1.2) if average_planned_blocks else 0
+        performance_target_blocks = round(average_planned_blocks * max(0.5, focus_vs_plan_rate / 100)) if average_planned_blocks else 0
+        target_planned_blocks = performance_target_blocks
+        if max_planned_blocks_with_buffer:
+            target_planned_blocks = (
+                min(performance_target_blocks, max_planned_blocks_with_buffer)
+                if performance_target_blocks
+                else max_planned_blocks_with_buffer
+            )
         editable_blocks = {key: blocks[key] for key in editable_block_keys if blocks.get(key)}
         schedule_alerts = []
         for todo in todos:
@@ -1678,6 +1686,7 @@ class MainWindow(QMainWindow):
                 "source": "recent 10 activity days excluding today",
                 "average_task_count": average_task_count,
                 "average_planned_blocks": average_planned_blocks,
+                "max_planned_blocks_with_20_percent_buffer": max_planned_blocks_with_buffer,
                 "average_focus_blocks": average_focus_blocks,
                 "target_planned_blocks_after_completion_adjustment": target_planned_blocks,
                 "average_continuous_work_minutes": average_range_minutes,
@@ -2129,6 +2138,173 @@ class MainWindow(QMainWindow):
             "필요할 때만 뒤쪽 초과 블록을 비우는 방식으로 실제 수행 가능성에 맞게 조정했습니다."
         )
 
+    def compressed_schedule_patch(self, context: dict, max_changes: int = 96) -> list[dict]:
+        editable = set(context.get("editable_block_keys", []))
+        protected = set(context.get("protected_block_keys", []))
+        excluded = set(context.get("excluded_block_keys", []))
+        current_blocks = {
+            item.get("block_key"): int(item.get("todo_id") or 0)
+            for item in context.get("current_blocks", [])
+            if item.get("block_key")
+        }
+        baseline = context.get("schedule_baseline", {})
+        todo_labels = {
+            int(todo.get("id") or 0): todo.get("subject") or todo.get("title") or "작업"
+            for todo in context.get("todos", [])
+            if int(todo.get("id") or 0) > 0
+        }
+
+        segments = []
+        idx = 0
+        while idx < len(ALL_BLOCK_KEYS):
+            key = ALL_BLOCK_KEYS[idx]
+            todo_id = current_blocks.get(key, 0)
+            if key not in editable or key in protected or key in excluded or todo_id <= 0:
+                idx += 1
+                continue
+
+            start_idx = idx
+            keys = []
+            while idx < len(ALL_BLOCK_KEYS):
+                next_key = ALL_BLOCK_KEYS[idx]
+                if (
+                    next_key not in editable
+                    or next_key in protected
+                    or next_key in excluded
+                    or current_blocks.get(next_key, 0) != todo_id
+                ):
+                    break
+                keys.append(next_key)
+                idx += 1
+
+            segments.append(
+                {
+                    "todo_id": todo_id,
+                    "keys": keys,
+                    "start_idx": start_idx,
+                    "end_idx": start_idx + len(keys) - 1,
+                }
+            )
+
+        if not segments:
+            return []
+
+        current_total_blocks = sum(len(segment["keys"]) for segment in segments)
+        max_allowed_blocks = int(baseline.get("max_planned_blocks_with_20_percent_buffer") or 0)
+        target_blocks = int(baseline.get("target_planned_blocks_after_completion_adjustment") or 0)
+        if max_allowed_blocks:
+            target_blocks = min(target_blocks, max_allowed_blocks) if target_blocks else max_allowed_blocks
+        if not target_blocks:
+            target_blocks = current_total_blocks
+        target_blocks = max(0, min(current_total_blocks, target_blocks))
+
+        if current_total_blocks <= target_blocks:
+            return []
+
+        min_keep = 1 if target_blocks >= len(segments) else 0
+        quotas = []
+        remaining_target = target_blocks
+        remaining_total = current_total_blocks
+        for segment in segments:
+            count = len(segment["keys"])
+            quota = round(count * remaining_target / remaining_total) if remaining_total else 0
+            quota = max(min_keep, min(count, quota))
+            quotas.append(quota)
+            remaining_target -= quota
+            remaining_total -= count
+
+        while sum(quotas) > target_blocks:
+            candidates = [i for i, quota in enumerate(quotas) if quota > min_keep]
+            if not candidates:
+                break
+            idx_to_reduce = max(candidates, key=lambda i: quotas[i])
+            quotas[idx_to_reduce] -= 1
+        while sum(quotas) < target_blocks:
+            candidates = [i for i, segment in enumerate(segments) if quotas[i] < len(segment["keys"])]
+            if not candidates:
+                break
+            idx_to_expand = max(candidates, key=lambda i: len(segments[i]["keys"]) - quotas[i])
+            quotas[idx_to_expand] += 1
+
+        movable_old_keys = {key for segment in segments for key in segment["keys"]}
+
+        def is_reflow_key(key: str) -> bool:
+            return (
+                key in editable
+                and key not in protected
+                and key not in excluded
+                and (current_blocks.get(key, 0) == 0 or key in movable_old_keys)
+            )
+
+        placements: list[tuple[int, list[str]]] = []
+        cursor_idx = segments[0]["start_idx"]
+        previous_new_end_idx = None
+        previous_old_end_idx = None
+
+        for segment, quota in zip(segments, quotas):
+            if quota <= 0:
+                placements.append((segment["todo_id"], []))
+                continue
+
+            if previous_new_end_idx is None:
+                cursor_idx = segment["start_idx"]
+            else:
+                original_gap = max(0, segment["start_idx"] - previous_old_end_idx - 1)
+                cursor_idx = previous_new_end_idx + 1 + original_gap
+
+            desired_keys = []
+            scan_idx = cursor_idx
+            while scan_idx < len(ALL_BLOCK_KEYS) and len(desired_keys) < quota:
+                key = ALL_BLOCK_KEYS[scan_idx]
+                if is_reflow_key(key):
+                    desired_keys.append(key)
+                scan_idx += 1
+
+            if len(desired_keys) < quota:
+                return []
+
+            placements.append((segment["todo_id"], desired_keys))
+            previous_new_end_idx = BLOCK_KEY_INDEX[desired_keys[-1]]
+            previous_old_end_idx = segment["end_idx"]
+
+        desired_by_key = {}
+        for todo_id, keys in placements:
+            for key in keys:
+                desired_by_key[key] = todo_id
+
+        patch = []
+        for key, todo_id in desired_by_key.items():
+            if current_blocks.get(key, 0) == todo_id:
+                continue
+            patch.append(
+                {
+                    "block_key": key,
+                    "todo_id": todo_id,
+                    "label": todo_labels.get(todo_id, "작업"),
+                    "reason": "현재 이후 가장 가까운 task의 시작 시간은 고정하고, 기존 task 간 간격을 유지한 채 뒤 task를 앞으로 당깁니다.",
+                }
+            )
+            if len(patch) >= max_changes:
+                return patch
+
+        for segment in segments:
+            todo_id = segment["todo_id"]
+            for key in segment["keys"]:
+                if desired_by_key.get(key) == todo_id:
+                    continue
+                patch.append(
+                    {
+                        "block_key": key,
+                        "todo_id": 0,
+                        "label": "비워두기",
+                        "reason": "최근 10일 평균의 120% 상한을 넘지 않도록 압축 배치 후 남는 뒤쪽 초과 블록을 비웁니다.",
+                    }
+                )
+                if len(patch) >= max_changes:
+                    return patch
+
+        return patch
+
     def local_realistic_schedule(self, proposal: dict, context: dict) -> dict:
         schedule = list(proposal.get("schedule") or [])
         scheduled_block_keys = {
@@ -2142,6 +2318,15 @@ class MainWindow(QMainWindow):
         work_blocks = int(baseline.get("typical_continuous_work_blocks") or 5)
         cycle_blocks = max(4, min(10, work_blocks + 1))
         max_changes = 96
+
+        compressed_patch = self.compressed_schedule_patch(context, max_changes=max_changes)
+        if compressed_patch:
+            schedule.extend(compressed_patch)
+            return {
+                "summary": proposal.get("summary") or "최근 기록 기준으로 과밀한 시간표를 현실적인 분량으로 압축했습니다.",
+                "realistic_reason": proposal.get("realistic_reason") or self.schedule_baseline_reason(context),
+                "schedule": schedule,
+            }
 
         for alert in context.get("schedule_alerts", []):
             if alert.get("type") != "too_long_continuous_task":
