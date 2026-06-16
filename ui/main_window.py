@@ -1314,12 +1314,17 @@ class MainWindow(QMainWindow):
         if self.ai.is_configured():
             return True
 
-        api_key, ok = QInputDialog.getText(
-            self,
-            "OpenAI API 키",
-            "AI 재조정을 실행할 OpenAI API 키를 입력하세요.\n키는 이 PC의 앱 설정 DB에 저장됩니다.",
-            QLineEdit.Password,
-        )
+     api_key, ok = QInputDialog.getText(
+    self,
+    "AI API 키",
+    "AI 재조정을 실행할 API 키를 입력하세요.\n\n"
+    "지원 API:\n"
+    "- OpenAI (sk-...)\n"
+    "- Gemini (AIza...)\n"
+    "- Hugging Face (hf_...)\n\n"
+    "키는 이 PC의 앱 설정 DB에 저장됩니다.",
+    QLineEdit.Password,
+)
         if not ok or not api_key.strip():
             return False
 
