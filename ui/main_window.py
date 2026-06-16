@@ -1559,7 +1559,13 @@ class MainWindow(QMainWindow):
                 }
             )
 
-        history_days = [day for day in recent_days if day["day"] != self.day][:10]
+        history_days = [
+            day
+            for day in recent_days
+            if day["day"] < self.day
+            and day["planned_minutes"] > 0
+            and day["performance"]["total_todos"] > 0
+        ][:10]
         history_planned_minutes = sum(day["planned_minutes"] for day in history_days)
         history_focus_minutes = sum(day["performance"]["focus_minutes"] for day in history_days)
         history_total_todos = sum(day["performance"]["total_todos"] for day in history_days)
@@ -2299,7 +2305,9 @@ class MainWindow(QMainWindow):
         return patch
 
     def local_realistic_schedule(self, proposal: dict, context: dict) -> dict:
-        schedule = list(proposal.get("schedule") or [])
+        # AI 제안은 근거 문구에만 사용하고, 실제 적용 패치는 앱의 규칙 기반
+        # 압축 로직으로만 만든다. AI가 특정 task를 통째로 비우는 것을 막기 위함.
+        schedule = []
         scheduled_block_keys = {
             item.get("block_key") for item in schedule if isinstance(item, dict)
         }
