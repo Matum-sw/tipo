@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from core.models import Subject, Todo
 from core.paths import DATA_DIR, DB_FILE
@@ -447,3 +447,52 @@ class SQLiteStore:
 
     def today(self) -> str:
         return date.today().isoformat()
+
+    # ── Sample Data ───────────────────────────────────────────────────────────
+
+    def add_sample_data(self, day: str) -> None:
+        """Study Stats(도넛/과목별 통계)·TimePlan·ToDoList 등 모든 기능을 점검할 수 있는 표본 데이터 추가."""
+        subjects = self.subjects(include_other=False)
+        if len(subjects) < 2:
+            existing_names = {s.name for s in subjects}
+            for name, difficulty in (("수학", "어려움"), ("영어", "보통")):
+                if name not in existing_names:
+                    self.add_subject(name, difficulty)
+            subjects = self.subjects(include_other=False)
+        subject_a, subject_b = subjects[0], subjects[1]
+
+        self.add_todo(day, "표본 — 수학 문제풀이", subject_a.id)
+        self.add_todo(day, "표본 — 영어 단어 암기", subject_b.id)
+        self.add_todo(day, "표본 — 복습 정리", subject_a.id)
+
+        sample_todos = {
+            todo.title: todo
+            for todo in self.todos_for_day(day)
+            if todo.title.startswith("표본 — ")
+        }
+        todo_focus = sample_todos["표본 — 수학 문제풀이"]
+        todo_scheduled = sample_todos["표본 — 영어 단어 암기"]
+        todo_done = sample_todos["표본 — 복습 정리"]
+
+        for block_key in ("09:00", "09:10", "09:20", "09:30"):
+            self.assign_block(day, block_key, todo_focus.id)
+        for block_key in ("10:00", "10:10", "10:20"):
+            self.assign_block(day, block_key, todo_scheduled.id)
+        for block_key in ("14:00", "14:10"):
+            self.assign_block(day, block_key, todo_done.id)
+
+        self.set_todo_status(todo_done.id, "done")
+
+        now = datetime.now()
+        focus_start = now - timedelta(minutes=30)
+        focus_end = now - timedelta(minutes=5)
+        self.add_timer_record(
+            day, todo_focus.id, subject_a.id, "09:00", "focus", 1500,
+            focus_start.isoformat(timespec="seconds"), focus_end.isoformat(timespec="seconds"),
+            "sample-data-session",
+        )
+        self.add_timer_record(
+            day, todo_focus.id, subject_a.id, "09:00", "break", 300,
+            focus_end.isoformat(timespec="seconds"), now.isoformat(timespec="seconds"),
+            "sample-data-session",
+        )

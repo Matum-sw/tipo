@@ -32,10 +32,12 @@ SPIN_FIELDS = [
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, store, parent=None):
+    def __init__(self, store, day: str, parent=None):
         super().__init__(parent)
         self.store = store
+        self.day = day
         self.data_reset = False
+        self.sample_added = False
         self._spins: dict[str, dict] = {}   # key → {val, min, max, suffix, label}
 
         self.setWindowTitle("설정")
@@ -84,6 +86,19 @@ class SettingsDialog(QDialog):
         form.addRow("테마", self.dark_mode_check)
 
         root.addLayout(form)
+
+        # ── 표본 추가 ────────────────────────────────────────────────────────
+        sample_btn = QPushButton("표본 추가")
+        sample_btn.setObjectName("SoftButton")
+        sample_btn.setStyleSheet("padding: 8px 16px; min-height: 0; border-radius: 10px;")
+        sample_btn.clicked.connect(self._add_sample_data)
+        sample_row = QHBoxLayout()
+        sample_hint = QLabel("Study Stats 등 모든 기능을 점검할 수 있는 표본 데이터를 추가합니다")
+        sample_hint.setObjectName("MutedText")
+        sample_hint.setStyleSheet("font-size: 12px;")
+        sample_row.addWidget(sample_hint, 1)
+        sample_row.addWidget(sample_btn)
+        root.addLayout(sample_row)
 
         # ── 저장 정보 초기화 ──────────────────────────────────────────────────
         reset_data_btn = QPushButton("저장 정보 초기화")
@@ -221,6 +236,22 @@ class SettingsDialog(QDialog):
         self.store.set_setting("alarm_volume", str(self.volume_slider.value()))
         self.store.set_setting("dark_mode", "1" if self.dark_mode_check.isChecked() else "0")
         self.accept()
+
+    def _add_sample_data(self) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("표본 추가")
+        box.setText("표본을 추가하시겠습니까?")
+        box.setInformativeText("Study Stats 그래프 등 모든 기능을 점검할 수 있는 표본 데이터가 오늘 날짜에 추가됩니다.")
+        add_button = box.addButton("추가", QMessageBox.AcceptRole)
+        box.addButton("취소", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() != add_button:
+            return
+
+        self.store.add_sample_data(self.day)
+        self.sample_added = True
+        QMessageBox.information(self, "표본 추가 완료", "표본 데이터가 추가되었습니다.")
 
     def _reset_data(self) -> None:
         reply = QMessageBox.warning(

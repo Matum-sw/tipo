@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         self.alarm.setVolume(vol / 100.0)
 
     def open_settings(self) -> None:
-        dlg = SettingsDialog(self.store, self)
+        dlg = SettingsDialog(self.store, self.day, self)
         if dlg.exec():
             self._load_timer_config()
             self._apply_alarm_volume()
@@ -154,6 +154,8 @@ class MainWindow(QMainWindow):
             if not self.store.has_real_subjects():
                 SubjectDialog(self.store, self).exec()
                 self.refresh_all()
+        if dlg.sample_added:
+            self.refresh_all()
 
     def _is_dark_mode(self) -> bool:
         return self.store.get_setting("dark_mode", "0") == "1"
