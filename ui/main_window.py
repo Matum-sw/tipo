@@ -1596,14 +1596,7 @@ class MainWindow(QMainWindow):
         completion_rate = round(history_done_todos / history_total_todos * 100) if history_total_todos else 0
         focus_vs_plan_rate = round(history_focus_minutes / history_planned_minutes * 100) if history_planned_minutes else 0
         max_planned_blocks_with_buffer = round(average_planned_blocks * 1.2) if average_planned_blocks else 0
-        performance_target_blocks = round(average_planned_blocks * max(0.5, focus_vs_plan_rate / 100)) if average_planned_blocks else 0
-        target_planned_blocks = performance_target_blocks
-        if max_planned_blocks_with_buffer:
-            target_planned_blocks = (
-                min(performance_target_blocks, max_planned_blocks_with_buffer)
-                if performance_target_blocks
-                else max_planned_blocks_with_buffer
-            )
+        target_planned_blocks = max_planned_blocks_with_buffer
         editable_blocks = {key: blocks[key] for key in editable_block_keys if blocks.get(key)}
         schedule_alerts = []
         for todo in todos:
