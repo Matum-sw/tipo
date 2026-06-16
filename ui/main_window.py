@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         self.alarm.setVolume(vol / 100.0)
 
     def open_settings(self) -> None:
-        dlg = SettingsDialog(self.store, self.day, self)
+        dlg = SettingsDialog(self.store, self.day, self.refresh_all, self)
         if dlg.exec():
             self._load_timer_config()
             self._apply_alarm_volume()
@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
             self.refresh_subjects()
             self.refresh_todos()
             self.refresh_blocks()
+        self.ai.set_api_key(self.store.get_setting("openai_api_key", ""))
         if dlg.data_reset:
             self.store.reset_all_data()
             self._db_segments_dirty = True
@@ -154,8 +155,6 @@ class MainWindow(QMainWindow):
             if not self.store.has_real_subjects():
                 SubjectDialog(self.store, self).exec()
                 self.refresh_all()
-        if dlg.sample_added:
-            self.refresh_all()
 
     def _is_dark_mode(self) -> bool:
         return self.store.get_setting("dark_mode", "0") == "1"
@@ -448,11 +447,11 @@ class MainWindow(QMainWindow):
         report_actions = QHBoxLayout()
         subject_stats_btn = QPushButton("과목별 공부시간")
         subject_stats_btn.setObjectName("SoftButton")
-        subject_stats_btn.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
+        subject_stats_btn.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 14px;")
         subject_stats_btn.clicked.connect(self.show_subject_stats)
         adjust_button = QPushButton("AI 시간표 재조정")
         adjust_button.setObjectName("PrimaryButton")
-        adjust_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
+        adjust_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 14px;")
         adjust_button.clicked.connect(self.show_schedule_adjustment_choices)
         report_actions.addWidget(subject_stats_btn)
         report_actions.addWidget(adjust_button)
@@ -528,6 +527,17 @@ class MainWindow(QMainWindow):
 
     # ── Time Plan ─────────────────────────────────────────────────────────────
 
+    def is_block_in_past(self, block_key: str) -> bool:
+        """self.day의 block_key가 가리키는 시간이 이미 지나간 시간인지 여부."""
+        today = datetime.now().date().isoformat()
+        if self.day < today:
+            return True
+        if self.day > today:
+            return False
+        now = datetime.now()
+        current_block_minutes = (now.hour * 60 + now.minute) // 10 * 10
+        return self.block_start_minutes(block_key) < current_block_minutes
+
     def on_block_pressed(self, block_key: str) -> None:
         if self.delete_mode:
             self.drag_is_painting = True
@@ -538,6 +548,9 @@ class MainWindow(QMainWindow):
         self.set_selected_block(block_key)
         blocks = dict(self.store.blocks_for_day(self.day))
         if self.selected_todo_id:
+            if self.is_block_in_past(block_key):
+                QMessageBox.information(self, "배치 불가", "이미 지나간 시간에는 일정을 추가할 수 없습니다.")
+                return
             self.drag_todo_id = self.selected_todo_id
             self.drag_start_block_key = block_key
             self.drag_visited_blocks = set()
@@ -626,6 +639,8 @@ class MainWindow(QMainWindow):
 
         for key in keys_to_paint:
             if key in self.drag_visited_blocks:
+                continue
+            if self.is_block_in_past(key):
                 continue
             existing = self.drag_existing_blocks.get(key)
             if existing and existing != self.drag_todo_id:
@@ -1684,8 +1699,10 @@ class MainWindow(QMainWindow):
 
     def show_subject_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)
+        todos = self.store.todos_for_day(self.day)
         dlg = SubjectStatsDialog(
             records,
+            todos,
             self.subject_color_map,
             self.subject_color_idx_map,
             SUBJECT_COLORS,

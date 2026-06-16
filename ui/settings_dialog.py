@@ -4,7 +4,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -32,12 +34,12 @@ SPIN_FIELDS = [
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, store, day: str, parent=None):
+    def __init__(self, store, day: str, on_sample_added=None, parent=None):
         super().__init__(parent)
         self.store = store
         self.day = day
+        self.on_sample_added = on_sample_added
         self.data_reset = False
-        self.sample_added = False
         self._spins: dict[str, dict] = {}   # key → {val, min, max, suffix, label}
 
         self.setWindowTitle("설정")
@@ -86,6 +88,22 @@ class SettingsDialog(QDialog):
         form.addRow("테마", self.dark_mode_check)
 
         root.addLayout(form)
+
+        # ── AI API 키 ────────────────────────────────────────────────────────
+        api_key_row = QHBoxLayout()
+        self.api_key_status_label = QLabel()
+        self.api_key_status_label.setStyleSheet("font-weight: 700;")
+        api_key_change_btn = QPushButton("변경")
+        api_key_change_btn.setObjectName("SoftButton")
+        api_key_change_btn.setStyleSheet("padding: 6px 14px; min-height: 0; border-radius: 10px;")
+        api_key_change_btn.clicked.connect(self._change_api_key)
+        api_key_row.addWidget(self.api_key_status_label, 1)
+        api_key_row.addWidget(api_key_change_btn)
+        form2 = QFormLayout()
+        form2.setSpacing(14)
+        form2.setLabelAlignment(Qt.AlignRight)
+        form2.addRow("AI API 키", api_key_row)
+        root.addLayout(form2)
 
         # ── 표본 추가 ────────────────────────────────────────────────────────
         sample_btn = QPushButton("표본 추가")
@@ -220,6 +238,33 @@ class SettingsDialog(QDialog):
         self.volume_slider.setValue(vol)
         self.volume_label.setText(f"{vol} %")
         self.dark_mode_check.setChecked(gi("dark_mode") == 1)
+        self._refresh_api_key_status()
+
+    def _refresh_api_key_status(self) -> None:
+        api_key = self.store.get_setting("openai_api_key", "")
+        if api_key:
+            self.api_key_status_label.setText("✓ 등록됨")
+            self.api_key_status_label.setStyleSheet("font-weight: 700; color: #2f9e44;")
+        else:
+            self.api_key_status_label.setText("✗ 등록되지 않음")
+            self.api_key_status_label.setStyleSheet("font-weight: 700; color: #e5484d;")
+
+    def _change_api_key(self) -> None:
+        api_key, ok = QInputDialog.getText(
+            self,
+            "AI API 키 변경",
+            "AI 재조정에 사용할 API 키를 입력하세요.\n\n"
+            "지원 API:\n"
+            "- OpenAI (sk-...)\n"
+            "- Gemini (AIza...)\n"
+            "- Hugging Face (hf_...)\n\n"
+            "키는 이 PC의 앱 설정 DB에 저장됩니다.",
+            QLineEdit.Password,
+        )
+        if not ok:
+            return
+        self.store.set_setting("openai_api_key", api_key.strip())
+        self._refresh_api_key_status()
 
     def _reset(self) -> None:
         d = SETTING_DEFAULTS
@@ -250,7 +295,8 @@ class SettingsDialog(QDialog):
             return
 
         self.store.add_sample_data(self.day)
-        self.sample_added = True
+        if self.on_sample_added:
+            self.on_sample_added()
         QMessageBox.information(self, "표본 추가 완료", "표본 데이터가 추가되었습니다.")
 
     def _reset_data(self) -> None:

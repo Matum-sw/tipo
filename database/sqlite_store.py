@@ -451,7 +451,8 @@ class SQLiteStore:
     # ── Sample Data ───────────────────────────────────────────────────────────
 
     def add_sample_data(self, day: str) -> None:
-        """Study Stats(도넛/과목별 통계)·TimePlan·ToDoList 등 모든 기능을 점검할 수 있는 표본 데이터 추가."""
+        """Study Stats(도넛/과목별 통계)·TimePlan·ToDoList 등 모든 기능을 실제 사용한 것처럼
+        현재 시각 기준 완료/진행 중/예정 표본 데이터로 점검할 수 있게 추가."""
         subjects = self.subjects(include_other=False)
         if len(subjects) < 2:
             existing_names = {s.name for s in subjects}
@@ -461,38 +462,55 @@ class SQLiteStore:
             subjects = self.subjects(include_other=False)
         subject_a, subject_b = subjects[0], subjects[1]
 
-        self.add_todo(day, "표본 — 수학 문제풀이", subject_a.id)
-        self.add_todo(day, "표본 — 영어 단어 암기", subject_b.id)
-        self.add_todo(day, "표본 — 복습 정리", subject_a.id)
+        self.add_todo(day, "표본 — 완료한 공부", subject_a.id)
+        self.add_todo(day, "표본 — 진행 중인 공부", subject_b.id)
+        self.add_todo(day, "표본 — 앞으로 할 공부", subject_a.id)
 
         sample_todos = {
             todo.title: todo
             for todo in self.todos_for_day(day)
             if todo.title.startswith("표본 — ")
         }
-        todo_focus = sample_todos["표본 — 수학 문제풀이"]
-        todo_scheduled = sample_todos["표본 — 영어 단어 암기"]
-        todo_done = sample_todos["표본 — 복습 정리"]
+        todo_done = sample_todos["표본 — 완료한 공부"]
+        todo_active = sample_todos["표본 — 진행 중인 공부"]
+        todo_upcoming = sample_todos["표본 — 앞으로 할 공부"]
 
-        for block_key in ("09:00", "09:10", "09:20", "09:30"):
-            self.assign_block(day, block_key, todo_focus.id)
-        for block_key in ("10:00", "10:10", "10:20"):
-            self.assign_block(day, block_key, todo_scheduled.id)
-        for block_key in ("14:00", "14:10"):
-            self.assign_block(day, block_key, todo_done.id)
+        def block_key_for(dt: datetime) -> str:
+            return f"{dt.hour:02d}:{(dt.minute // 10) * 10:02d}"
 
-        self.set_todo_status(todo_done.id, "done")
+        def assign_range(start: datetime, end: datetime, todo_id: int) -> None:
+            cursor = start
+            while cursor < end:
+                self.assign_block(day, block_key_for(cursor), todo_id)
+                cursor += timedelta(minutes=10)
 
         now = datetime.now()
-        focus_start = now - timedelta(minutes=30)
-        focus_end = now - timedelta(minutes=5)
+        current_block_start = now.replace(minute=(now.minute // 10) * 10, second=0, microsecond=0)
+
+        # 1) 이미 끝낸 일 — 1시간 전 ~ 30분 전, 완료 처리 + 실제 타이머(focus) 기록
+        done_start = current_block_start - timedelta(minutes=60)
+        done_end = current_block_start - timedelta(minutes=30)
+        assign_range(done_start, done_end, todo_done.id)
+        self.set_todo_status(todo_done.id, "done")
         self.add_timer_record(
-            day, todo_focus.id, subject_a.id, "09:00", "focus", 1500,
-            focus_start.isoformat(timespec="seconds"), focus_end.isoformat(timespec="seconds"),
+            day, todo_done.id, subject_a.id, block_key_for(done_start), "focus",
+            int((done_end - done_start).total_seconds()),
+            done_start.isoformat(timespec="seconds"), done_end.isoformat(timespec="seconds"),
             "sample-data-session",
         )
+
+        # 2) 지금 진행 중인 일 — 현재 블록을 포함한 구간, 지금까지 경과한 실제 타이머(focus) 기록
+        active_start = current_block_start - timedelta(minutes=10)
+        active_end = current_block_start + timedelta(minutes=20)
+        assign_range(active_start, active_end, todo_active.id)
         self.add_timer_record(
-            day, todo_focus.id, subject_a.id, "09:00", "break", 300,
-            focus_end.isoformat(timespec="seconds"), now.isoformat(timespec="seconds"),
+            day, todo_active.id, subject_b.id, block_key_for(active_start), "focus",
+            max(60, int((now - active_start).total_seconds())),
+            active_start.isoformat(timespec="seconds"), now.isoformat(timespec="seconds"),
             "sample-data-session",
         )
+
+        # 3) 앞으로 할 일 — 1~2시간 뒤, 계획만 존재(타이머 기록 없음)
+        upcoming_start = current_block_start + timedelta(minutes=60)
+        upcoming_end = current_block_start + timedelta(minutes=120)
+        assign_range(upcoming_start, upcoming_end, todo_upcoming.id)

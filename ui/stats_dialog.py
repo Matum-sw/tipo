@@ -9,25 +9,29 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-DAY_MINUTES = 24 * 60
-
 
 class SubjectBarChart(QWidget):
-    """과목별 공부시간 수평 막대 그래프 (x축: 0~24h, y축: 과목)."""
+    """과목별 공부시간 수평 막대 그래프. 각 막대의 최대값(꽉 채운 길이)은
+    해당 과목의 TimePlan 계획 시간(scheduled_minutes)이다."""
 
     def __init__(self, data: list[dict], parent=None):
         """
-        data: [{"name": str, "minutes": int, "color": dict}, ...]
+        data: [{"name": str, "minutes": int, "scheduled_minutes": int, "color": dict}, ...]
         color: {"bg": str, "border": str, "text": str}
         """
         super().__init__(parent)
-        self.data = [d for d in data if d["minutes"] > 0]
+        self.data = [d for d in data if d["minutes"] > 0 or d["scheduled_minutes"] > 0]
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def sizeHint(self):
         from PySide6.QtCore import QSize
         rows = max(len(self.data), 1)
         return QSize(560, rows * 52 + 60)
+
+    @staticmethod
+    def _fmt_minutes(minutes: int) -> str:
+        h_val, m_val = divmod(minutes, 60)
+        return f"{h_val}h {m_val}m" if h_val else f"{m_val}m"
 
     def paintEvent(self, event) -> None:
         if not self.data:
@@ -37,47 +41,28 @@ class SubjectBarChart(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         margin_left = 120
-        margin_right = 20
+        margin_right = 90
         margin_top = 20
-        margin_bottom = 40
         row_height = 36
         row_gap = 16
         chart_w = self.width() - margin_left - margin_right
 
-        # x축 눈금선 + 레이블 (0, 4, 8, 12, 16, 20, 24)
-        tick_hours = [0, 4, 8, 12, 16, 20, 24]
-        chart_h = len(self.data) * (row_height + row_gap)
-        font = QFont(self.font())
-        font.setPointSize(9)
-        painter.setFont(font)
-
-        for h in tick_hours:
-            x = margin_left + int(chart_w * h / 24)
-            painter.setPen(QColor("#e0e6f0"))
-            painter.drawLine(x, margin_top, x, margin_top + chart_h)
-            painter.setPen(QColor("#93a0b4"))
-            painter.drawText(
-                QRectF(x - 16, margin_top + chart_h + 6, 32, 18),
-                Qt.AlignCenter,
-                str(h),
-            )
-
-        painter.setPen(QColor("#b0b8c8"))
-        painter.drawLine(margin_left, margin_top + chart_h, margin_left + chart_w, margin_top + chart_h)
-
         for i, item in enumerate(self.data):
             y = margin_top + i * (row_height + row_gap)
             minutes = item["minutes"]
+            scheduled_minutes = item["scheduled_minutes"]
             color = item.get("color", {})
 
-            bar_w = int(chart_w * minutes / DAY_MINUTES)
+            # 막대 최대값 = 해당 과목의 TimePlan 계획 시간. 계획이 없으면 실제 시간을 기준으로 꽉 채움.
+            max_minutes = scheduled_minutes if scheduled_minutes > 0 else max(minutes, 1)
+            bar_w = int(chart_w * min(minutes, max_minutes) / max_minutes)
 
-            # 배경 회색 트랙
+            # 배경 회색 트랙 (= 계획 시간 전체)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#f0f4fb"))
             painter.drawRoundedRect(QRectF(margin_left, y, chart_w, row_height), 6, 6)
 
-            # 실제 막대
+            # 실제 막대 (= 실제 공부 시간)
             if bar_w > 0:
                 bg = QColor(color.get("bg", "#eaf3ff"))
                 border = QColor(color.get("border", "#b9d4ff"))
@@ -97,22 +82,21 @@ class SubjectBarChart(QWidget):
                 item["name"],
             )
 
-            # 시간 텍스트 (막대 오른쪽)
-            h_val, m_val = divmod(minutes, 60)
-            time_str = f"{h_val}h {m_val}m" if h_val else f"{m_val}m"
+            # 시간 텍스트 (막대 오른쪽) — 실제/계획
+            time_str = f"{self._fmt_minutes(minutes)} / {self._fmt_minutes(scheduled_minutes)}"
             font_val = QFont(self.font())
             font_val.setPointSize(9)
             painter.setFont(font_val)
             painter.setPen(QColor("#647086"))
             painter.drawText(
-                QRectF(margin_left + bar_w + 4, y, 60, row_height),
+                QRectF(margin_left + chart_w + 4, y, margin_right - 4, row_height),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 time_str,
             )
 
 
 class SubjectStatsDialog(QDialog):
-    def __init__(self, records: list[dict], subject_color_map: dict, subject_color_idx_map: dict,
+    def __init__(self, records: list[dict], todos: list, subject_color_map: dict, subject_color_idx_map: dict,
                  subject_colors: list, subject_color_other: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("과목별 공부시간")
@@ -120,7 +104,7 @@ class SubjectStatsDialog(QDialog):
         self.setMinimumSize(620, 400)
         self.setObjectName("SubjectDialog")
 
-        data = self._aggregate(records, subject_color_map, subject_color_idx_map,
+        data = self._aggregate(records, todos, subject_color_map, subject_color_idx_map,
                                subject_colors, subject_color_other)
 
         root = QVBoxLayout(self)
@@ -141,47 +125,41 @@ class SubjectStatsDialog(QDialog):
         root.addWidget(scroll, 1)
 
     @staticmethod
-    def _aggregate(records, subject_color_map, subject_color_idx_map,
+    def _aggregate(records, todos, subject_color_map, subject_color_idx_map,
                    subject_colors, subject_color_other) -> list[dict]:
         from collections import defaultdict
+
         totals: dict[str, int] = defaultdict(int)
-        meta: dict[str, dict] = {}
-        for r in records:
-            if r["event_type"] != "focus":
-                continue
-            if r["subject_kind"] == "other":
-                continue
-            name = r["subject_name"]
-            totals[name] += r["seconds"] // 60
-            if name not in meta:
-                # find color by subject_id (not in record directly; use name lookup)
-                meta[name] = {"name": name, "color": {}}
-
-        # Build color lookup by subject name
-        # subject_color_map is keyed by subject_id; we need subject_id for each name
-        # Build name→color from subject_color_map + subject_color_idx_map
-        name_color: dict[str, dict] = {}
-        for sid, color in subject_color_map.items():
-            # We don't have subject name here directly; will be filled below
-            pass
-
-        # Use a simpler approach: records already carry subject_name
-        # Rebuild from records
+        scheduled: dict[str, int] = defaultdict(int)
         sid_name: dict[int, str] = {}
+
         for r in records:
             sid = r.get("subject_id")
             if sid and sid not in sid_name:
                 sid_name[sid] = r["subject_name"]
+            if r["event_type"] != "focus" or r["subject_kind"] == "other":
+                continue
+            totals[r["subject_name"]] += r["seconds"] // 60
 
-        for sid, name in sid_name.items():
-            color = subject_color_map.get(sid, subject_color_other)
-            name_color[name] = color
+        for todo in todos:
+            if todo.subject_kind == "other":
+                continue
+            sid_name.setdefault(todo.subject_id, todo.subject_name)
+            scheduled[todo.subject_name] += todo.planned_minutes
 
+        name_color: dict[str, dict] = {
+            name: subject_color_map.get(sid, subject_color_other)
+            for sid, name in sid_name.items()
+        }
+
+        names = sorted(set(totals) | set(scheduled))
         result = []
-        for name, minutes in sorted(totals.items(), key=lambda x: x[1], reverse=True):
+        for name in names:
             result.append({
                 "name": name,
-                "minutes": minutes,
+                "minutes": totals.get(name, 0),
+                "scheduled_minutes": scheduled.get(name, 0),
                 "color": name_color.get(name, {}),
             })
+        result.sort(key=lambda item: item["minutes"], reverse=True)
         return result

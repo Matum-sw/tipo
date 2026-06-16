@@ -1,0 +1,409 @@
+* {
+  font-family: "Inter", "SF Pro Display", "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+  font-size: 14px;
+  color: #e8edf8;
+}
+
+#AppRoot {
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+    stop:0 #141927,
+    stop:0.5 #161c2c,
+    stop:1 #1a2030);
+}
+
+#CardSubtitle,
+#DialogBody,
+#MutedText,
+#TimerContext {
+  color: #8a96ab;
+  line-height: 140%;
+}
+
+#Card {
+  background: rgba(26, 32, 48, 0.92);
+  border: 1px solid rgba(42, 54, 80, 0.82);
+  border-radius: 24px;
+}
+
+#CardTitle {
+  font-size: 20px;
+  font-weight: 800;
+  color: #f0f4fb;
+}
+
+#TopControls {
+  background: transparent;
+}
+
+#DateButton {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  color: #dde4f0;
+}
+
+#DialogTitle {
+  font-size: 26px;
+  font-weight: 800;
+  color: #f0f4fb;
+}
+
+QLineEdit,
+QTextEdit,
+QComboBox,
+QListWidget {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  border-radius: 16px;
+  padding: 10px 13px;
+  color: #e8edf8;
+  selection-background-color: #2a3650;
+}
+
+QLineEdit,
+QComboBox {
+  min-height: 42px;
+}
+
+QComboBox {
+  padding-right: 38px;
+}
+
+QComboBox::drop-down {
+  width: 32px;
+  border: none;
+  border-top-right-radius: 16px;
+  border-bottom-right-radius: 16px;
+  background: #20283c;
+}
+
+QComboBox::down-arrow {
+  width: 0;
+  height: 0;
+  image: none;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #8a96ab;
+  margin-right: 10px;
+}
+
+QMenu {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  border-radius: 14px;
+  padding: 8px;
+  color: #e8edf8;
+}
+
+QMenu::item {
+  border-radius: 10px;
+  padding: 9px 28px 9px 12px;
+}
+
+QMenu::item:selected {
+  background: #25304a;
+  color: #7baeff;
+}
+
+QTextEdit {
+  padding: 14px;
+}
+
+QLineEdit:focus,
+QTextEdit:focus,
+QComboBox:focus {
+  border: 1px solid #5a9aff;
+}
+
+QListWidget {
+  outline: none;
+  padding: 8px;
+}
+
+QListWidget::item {
+  border-radius: 14px;
+  padding: 4px;
+  margin: 4px;
+}
+
+QListWidget::item:selected {
+  background: #1f2c44;
+  color: #7baeff;
+}
+
+#TodoItemWidget {
+  background: transparent;
+}
+
+#TodoItemTitle {
+  color: #e8edf8;
+  font-size: 14px;
+  font-weight: 800;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+#TodoItemMeta {
+  color: #8a96ab;
+  font-size: 12px;
+  font-weight: 700;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+#TodoDoneCheck {
+  color: #34c759;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+QPushButton {
+  border: none;
+  border-radius: 15px;
+  padding: 11px 16px;
+  font-weight: 700;
+  background: #232b40;
+  color: #dde4f0;
+  min-height: 40px;
+}
+
+QPushButton:hover {
+  background: #2a3450;
+}
+
+#PrimaryButton {
+  background: #3f7df1;
+  color: white;
+}
+
+#PrimaryButton:hover {
+  background: #5a9aff;
+}
+
+#GhostButton {
+  background: rgba(255, 255, 255, 0.06);
+  color: #c7d0e0;
+  border: 1px solid #2a3650;
+}
+
+#SoftButton {
+  background: #1a2c4a;
+  color: #7baeff;
+}
+
+#SubjectButton {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  color: #dde4f0;
+}
+
+#SubjectButton::menu-indicator {
+  image: none;
+  width: 0;
+}
+
+#DangerButton {
+  background: #e5484d;
+  color: #ffffff;
+}
+
+#DangerButton:hover {
+  background: #ff5b5f;
+}
+
+#TimerValue {
+  font-size: 44px;
+  font-weight: 900;
+  color: #f0f4fb;
+  min-height: 76px;
+  padding: 8px 0;
+}
+
+#PomodoroStatus {
+  color: #5a9aff;
+  font-weight: 800;
+}
+
+#PomodoroVisual {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  border-radius: 12px;
+  color: #aab6c8;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 10px;
+}
+
+#PlanScroll {
+  border: none;
+  background: transparent;
+}
+
+#PlanScroll QWidget {
+  background: transparent;
+}
+
+#StatsScroll {
+  border: none;
+  background: transparent;
+  min-height: 120px;
+}
+
+#StatsScroll QWidget {
+  background: transparent;
+}
+
+QScrollBar:vertical {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  border-radius: 7px;
+  width: 14px;
+  margin: 3px 2px 3px 2px;
+}
+
+QScrollBar::handle:vertical {
+  background: #3a5080;
+  border-radius: 6px;
+  min-height: 34px;
+}
+
+QScrollBar::handle:vertical:hover {
+  background: #4e6da0;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+  background: transparent;
+  border: none;
+  height: 0;
+}
+
+QScrollBar:horizontal {
+  background: transparent;
+  border: none;
+  height: 0;
+}
+
+#TimeGrid {
+  background: transparent;
+}
+
+#GridHeader,
+#HourLabel {
+  color: #7a8799;
+  font-weight: 700;
+  font-size: 12px;
+  padding-top: 0;
+}
+
+#TimelineHeader {
+  background: transparent;
+}
+
+#TimeBlock {
+  background: rgba(26, 32, 48, 0.7);
+  border: 1px solid #2a3650;
+  border-radius: 0;
+  color: #8a96ab;
+  font-weight: 700;
+  text-align: left;
+  padding: 7px;
+}
+
+#TimeBlock[segment="first"] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+#TimeBlock[segment="middle"] {
+  border-left: none;
+}
+
+#TimeBlock[segment="last"] {
+  border-left: none;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+#TimeBlock:hover {
+  background: #1e2840;
+  border: 1px solid #3a5080;
+}
+
+#TimeBlock[filled="true"] {
+  background: #16233d;
+  border: 1px solid #2a4880;
+  color: #7baeff;
+}
+
+#TimeBlock[life="true"] {
+  background: #16241a;
+  border: 1px solid #2a4020;
+  color: #7fc26a;
+}
+
+#TimeBlock[selected="true"] {
+  border: 2px solid #5a9aff;
+}
+
+#Pill {
+  border-radius: 15px;
+  padding: 4px 12px;
+  font-weight: 800;
+  min-height: 20px;
+}
+
+#Pill[tone="blue"] {
+  background: #1a2c4a;
+  color: #7baeff;
+}
+
+#Pill[tone="green"] {
+  background: #16241a;
+  color: #7fc26a;
+}
+
+#Pill[tone="orange"] {
+  background: #2a1c10;
+  color: #e0905a;
+}
+
+#SubjectDialog {
+  background: #11141f;
+}
+
+#DateDialog {
+  background: #11141f;
+}
+
+#DateCalendar {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  border-radius: 16px;
+  padding: 10px;
+}
+
+#DateCalendar QToolButton {
+  background: #1a2c4a;
+  color: #7baeff;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-weight: 800;
+}
+
+#DateCalendar QMenu {
+  background: #1a2030;
+}
+
+#DateCalendar QSpinBox {
+  background: #1a2030;
+  border: 1px solid #2a3650;
+  border-radius: 10px;
+  padding: 4px 8px;
+}
+
+#DateCalendar QAbstractItemView {
+  selection-background-color: #3f7df1;
+  selection-color: #ffffff;
+}
