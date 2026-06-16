@@ -91,7 +91,9 @@ class MainWindow(QMainWindow):
         self.drag_last_block_key = None
         self.drag_start_block_key = None
         self.drag_existing_blocks = {}
+        self.drag_excluded_blocks = set()
         self.delete_mode = False
+        self.exclude_mode = False
         self.running = None
         self.pomodoro_history = []
         self._db_segments_cache: list[dict] = []
@@ -277,6 +279,11 @@ class MainWindow(QMainWindow):
         plan_actions = QHBoxLayout()
         self.selected_block_label = QLabel("선택된 블록 없음")
         self.selected_block_label.setObjectName("MutedText")
+        self.exclude_mode_button = QPushButton("제외 시간")
+        self.exclude_mode_button.setObjectName("WarningButton")
+        self.exclude_mode_button.setCheckable(True)
+        self.exclude_mode_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 8px;")
+        self.exclude_mode_button.clicked.connect(self.toggle_exclude_mode)
         self.delete_mode_button = QPushButton("추가 모드")
         self.delete_mode_button.setObjectName("SoftButton")
         self.delete_mode_button.setCheckable(True)
@@ -287,6 +294,7 @@ class MainWindow(QMainWindow):
         clear_all_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 8px;")
         clear_all_button.clicked.connect(self.clear_all_blocks)
         plan_actions.addWidget(self.selected_block_label, 1)
+        plan_actions.addWidget(self.exclude_mode_button)
         plan_actions.addWidget(self.delete_mode_button)
         plan_actions.addWidget(clear_all_button)
         card.layout.addLayout(plan_actions)
@@ -458,6 +466,12 @@ class MainWindow(QMainWindow):
     # ── Todo ──────────────────────────────────────────────────────────────────
 
     def open_add_todo_dialog(self) -> None:
+        if self.delete_mode:
+            QMessageBox.information(self, "삭제 모드", "현재 삭제 모드입니다. 추가 모드로 변경해 주세요.")
+            return
+        if self.exclude_mode:
+            QMessageBox.information(self, "제외 시간 모드", "현재 제외 시간 모드입니다. 제외 시간 버튼을 해제해 주세요.")
+            return
         self.log_event("todo_add_opened", subject_id=self.selected_subject_id)
         dialog = TodoAddDialog(self.store, self.day, self.selected_subject_id, self.subject_color_map, self)
         dialog.exec()
@@ -465,6 +479,12 @@ class MainWindow(QMainWindow):
         self.refresh_todos()
 
     def select_todo(self, item: QListWidgetItem) -> None:
+        if self.delete_mode:
+            QMessageBox.information(self, "삭제 모드", "현재 삭제 모드입니다. 추가 모드로 변경해 주세요.")
+            return
+        if self.exclude_mode:
+            QMessageBox.information(self, "제외 시간 모드", "현재 제외 시간 모드입니다. 제외 시간 버튼을 해제해 주세요.")
+            return
         self.selected_todo_id = item.data(Qt.UserRole)
         todo = self.todo_lookup.get(self.selected_todo_id)
         self.log_event(
@@ -543,16 +563,28 @@ class MainWindow(QMainWindow):
             self.erase_block(block_key)
             return
 
+        if self.exclude_mode:
+            self.drag_is_painting = True
+            self.drag_visited_blocks = set()
+            self.drag_last_block_key = None
+            self.drag_existing_blocks = dict(self.store.blocks_for_day(self.day))
+            self.paint_excluded_to_block(block_key)
+            return
+
         self.set_selected_block(block_key)
         blocks = dict(self.store.blocks_for_day(self.day))
         if self.selected_todo_id:
             if self.is_block_in_past(block_key):
                 QMessageBox.information(self, "배치 불가", "이미 지나간 시간에는 일정을 추가할 수 없습니다.")
                 return
+            if block_key in self.store.excluded_blocks_for_day(self.day):
+                QMessageBox.information(self, "배치 불가", "제외 시간으로 지정된 블록에는 일정을 추가할 수 없습니다.")
+                return
             self.drag_todo_id = self.selected_todo_id
             self.drag_start_block_key = block_key
             self.drag_visited_blocks = set()
             self.drag_existing_blocks = blocks
+            self.drag_excluded_blocks = self.store.excluded_blocks_for_day(self.day)
             self.drag_is_painting = True
             self.paint_todo_to_block(block_key)
             return
@@ -569,6 +601,8 @@ class MainWindow(QMainWindow):
             return
         if self.delete_mode:
             self.erase_block(block_key)
+        elif self.exclude_mode:
+            self.paint_excluded_to_block(block_key)
         elif self.drag_todo_id:
             self.paint_todo_to_block(block_key)
 
@@ -581,6 +615,8 @@ class MainWindow(QMainWindow):
         if isinstance(widget, TimeBlockButton):
             if self.delete_mode:
                 self.erase_block(widget.block_key)
+            elif self.exclude_mode:
+                self.paint_excluded_to_block(widget.block_key)
             elif self.drag_todo_id:
                 self.paint_todo_to_block(widget.block_key)
 
@@ -592,17 +628,23 @@ class MainWindow(QMainWindow):
         todo_id = self.drag_todo_id
         last_block_key = self.drag_last_block_key or block_key
         was_delete_mode = self.delete_mode
+        was_exclude_mode = self.exclude_mode
         self.drag_todo_id = None
         self.drag_is_painting = False
         self.drag_last_block_key = None
         self.drag_start_block_key = None
         self.drag_existing_blocks = {}
+        self.drag_excluded_blocks = set()
         self.drag_visited_blocks = set()
 
         if was_delete_mode:
             self.log_event("block_erased", block_key=last_block_key, metadata={"block_count": visited_count})
             self.refresh_todos()
             self.refresh_stats()
+            return
+
+        if was_exclude_mode:
+            self.log_event("block_excluded", block_key=last_block_key, metadata={"block_count": visited_count})
             return
 
         self.refresh_blocks()
@@ -640,6 +682,8 @@ class MainWindow(QMainWindow):
                 continue
             if self.is_block_in_past(key):
                 continue
+            if key in self.drag_excluded_blocks:
+                continue
             existing = self.drag_existing_blocks.get(key)
             if existing and existing != self.drag_todo_id:
                 continue
@@ -650,10 +694,44 @@ class MainWindow(QMainWindow):
 
         self.set_selected_block(block_key)
 
+    def paint_excluded_to_block(self, block_key: str) -> None:
+        if self.drag_last_block_key and self.drag_last_block_key != block_key:
+            last_idx = BLOCK_KEY_INDEX.get(self.drag_last_block_key, 0)
+            curr_idx = BLOCK_KEY_INDEX.get(block_key, 0)
+            lo, hi = min(last_idx, curr_idx), max(last_idx, curr_idx)
+            keys_to_paint = ALL_BLOCK_KEYS[lo : hi + 1]
+        else:
+            keys_to_paint = [block_key]
+
+        for key in keys_to_paint:
+            if key in self.drag_visited_blocks:
+                continue
+            self.drag_visited_blocks.add(key)
+            self.drag_last_block_key = key
+            # 일정이 등록된 곳에는 제외 시간을 지정할 수 없다.
+            if self.drag_existing_blocks.get(key):
+                continue
+            self.store.set_block_excluded(self.day, key, True)
+            button = self.block_buttons.get(key)
+            if button:
+                button.setProperty("excluded", True)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
+
     def erase_block(self, block_key: str) -> None:
         if block_key in self.drag_visited_blocks:
             return
         self.drag_visited_blocks.add(block_key)
+        if self.store.is_block_excluded(self.day, block_key):
+            self.store.set_block_excluded(self.day, block_key, False)
+            button = self.block_buttons.get(block_key)
+            if button:
+                button.setProperty("excluded", False)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
+            return
         if self.store.block_has_timer_records(self.day, block_key):
             return
         self.store.delete_block(self.day, block_key)
@@ -675,10 +753,24 @@ class MainWindow(QMainWindow):
         if self.delete_mode:
             self.delete_mode_button.setText("삭제 모드")
             self.delete_mode_button.setObjectName("DangerButton")
+            # 삭제 모드가 활성화되면 선택돼 있던 할 일은 선택 해제한다.
+            self.selected_todo_id = None
+            self.refresh_todos()
+            if self.exclude_mode:
+                self.exclude_mode_button.setChecked(False)
+                self.toggle_exclude_mode()
         else:
             self.delete_mode_button.setText("추가 모드")
             self.delete_mode_button.setObjectName("SoftButton")
         self.repolish(self.delete_mode_button)
+
+    def toggle_exclude_mode(self) -> None:
+        self.exclude_mode = self.exclude_mode_button.isChecked()
+        self.log_event("exclude_mode_toggled", metadata={"enabled": self.exclude_mode})
+        if self.exclude_mode and self.delete_mode:
+            self.delete_mode_button.setChecked(False)
+            self.toggle_delete_mode()
+        self.repolish(self.exclude_mode_button)
 
     def clear_all_blocks(self) -> None:
         reply = QMessageBox.question(
@@ -1633,6 +1725,7 @@ class MainWindow(QMainWindow):
 
     def refresh_blocks(self) -> None:
         blocks = self.store.blocks_for_day(self.day)
+        excluded = self.store.excluded_blocks_for_day(self.day)
         for key, button in self.block_buttons.items():
             todo = self.todo_lookup.get(blocks.get(key))
             if not todo:
@@ -1651,6 +1744,8 @@ class MainWindow(QMainWindow):
                 button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
             button.setProperty("selected", key == self.selected_block_key)
             button.setProperty("past", self.is_block_in_past(key))
+            button.setProperty("timer_ran", self.store.block_has_timer_records(self.day, key))
+            button.setProperty("excluded", key in excluded)
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
@@ -1669,6 +1764,8 @@ class MainWindow(QMainWindow):
         button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
         button.setProperty("selected", block_key == self.selected_block_key)
         button.setProperty("past", self.is_block_in_past(block_key))
+        button.setProperty("timer_ran", self.store.block_has_timer_records(self.day, block_key))
+        button.setProperty("excluded", self.store.is_block_excluded(self.day, block_key))
         button.style().unpolish(button)
         button.style().polish(button)
 
@@ -1679,6 +1776,7 @@ class MainWindow(QMainWindow):
             if button.property("past") == is_past:
                 continue
             button.setProperty("past", is_past)
+            button.setProperty("timer_ran", self.store.block_has_timer_records(self.day, key))
             button.update()
 
     def refresh_stats(self) -> None:

@@ -52,6 +52,12 @@ class SQLiteStore:
                 FOREIGN KEY(todo_id) REFERENCES todos(id)
             );
 
+            CREATE TABLE IF NOT EXISTS excluded_blocks (
+                day TEXT NOT NULL,
+                block_key TEXT NOT NULL,
+                PRIMARY KEY(day, block_key)
+            );
+
             CREATE TABLE IF NOT EXISTS timer_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 day TEXT NOT NULL,
@@ -314,6 +320,32 @@ class SQLiteStore:
             "SELECT block_key, todo_id FROM time_blocks WHERE day = ?", (day,)
         ).fetchall()
         return {row["block_key"]: row["todo_id"] for row in rows}
+
+    # ── Excluded Blocks (제외 시간) ───────────────────────────────────────────
+
+    def set_block_excluded(self, day: str, block_key: str, excluded: bool) -> None:
+        if excluded:
+            self.connection.execute(
+                "INSERT OR IGNORE INTO excluded_blocks(day, block_key) VALUES (?, ?)",
+                (day, block_key),
+            )
+        else:
+            self.connection.execute(
+                "DELETE FROM excluded_blocks WHERE day = ? AND block_key = ?", (day, block_key)
+            )
+        self.connection.commit()
+
+    def is_block_excluded(self, day: str, block_key: str) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM excluded_blocks WHERE day = ? AND block_key = ?", (day, block_key)
+        ).fetchone()
+        return row is not None
+
+    def excluded_blocks_for_day(self, day: str) -> set[str]:
+        rows = self.connection.execute(
+            "SELECT block_key FROM excluded_blocks WHERE day = ?", (day,)
+        ).fetchall()
+        return {row["block_key"] for row in rows}
 
     # ── Timer Records ─────────────────────────────────────────────────────────
 
