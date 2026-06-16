@@ -55,17 +55,17 @@ class AIFeedbackService:
 
     def build_prompt(self, markdown_report: str) -> str:
         return (
-            "You are a warm productivity coach. Review this student's daily time-boxing report. "
-            "Give concise feedback in Korean: one strength, one bottleneck, and one next action.\n\n"
+            "You are a warm productivity coach. "
+            "Give concise Korean feedback: one strength, one bottleneck, and one next action.\n\n"
             f"{markdown_report}"
         )
 
     def generate_feedback(self, markdown_report: str) -> str:
         if not self.is_configured():
-            return "API 키가 설정되면 이 리포트를 바탕으로 AI 피드백을 생성할 수 있습니다."
+            return "API 키가 설정되면 AI 피드백을 생성할 수 있습니다."
 
-        prompt = self.build_prompt(markdown_report)
         provider = self.provider()
+        prompt = self.build_prompt(markdown_report)
 
         if provider == "openai":
             return self._openai_feedback(prompt)
@@ -74,9 +74,7 @@ class AIFeedbackService:
         if provider == "gemini":
             return self._gemini_feedback(prompt)
 
-        raise ValueError(
-            "지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다."
-        )
+        raise ValueError("지원되지 않는 API 키입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다.")
 
     def generate_realistic_schedule(self, context: dict) -> dict:
         if not self.is_configured():
@@ -91,15 +89,13 @@ class AIFeedbackService:
         if provider == "gemini":
             return self._gemini_schedule(context)
 
-        raise ValueError(
-            "지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다."
-        )
+        raise ValueError("지원되지 않는 API 키입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다.")
 
     def _openai_feedback(self, prompt: str) -> str:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. pip install openai 를 실행해주세요.") from exc
+            raise RuntimeError("openai 패키지가 없습니다. pip install openai 를 실행해주세요.") from exc
 
         client = OpenAI(api_key=self.api_key)
         response = client.responses.create(
@@ -113,7 +109,7 @@ class AIFeedbackService:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
-            raise RuntimeError("huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요.") from exc
+            raise RuntimeError("huggingface_hub 패키지가 없습니다. pip install huggingface_hub 를 실행해주세요.") from exc
 
         client = InferenceClient(api_key=self.api_key)
         response = client.chat.completions.create(
@@ -127,7 +123,7 @@ class AIFeedbackService:
         try:
             import google.generativeai as genai
         except ImportError as exc:
-            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
+            raise RuntimeError("google-generativeai 패키지가 없습니다. pip install google-generativeai 를 실행해주세요.") from exc
 
         genai.configure(api_key=self.api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
@@ -138,7 +134,7 @@ class AIFeedbackService:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. pip install openai 를 실행해주세요.") from exc
+            raise RuntimeError("openai 패키지가 없습니다. pip install openai 를 실행해주세요.") from exc
 
         client = OpenAI(api_key=self.api_key)
         response = client.responses.create(
@@ -160,38 +156,33 @@ class AIFeedbackService:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
-            raise RuntimeError("huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요.") from exc
+            raise RuntimeError("huggingface_hub 패키지가 없습니다. pip install huggingface_hub 를 실행해주세요.") from exc
 
         client = InferenceClient(api_key=self.api_key)
         response = client.chat.completions.create(
             model="Qwen/Qwen2.5-7B-Instruct",
             messages=[{"role": "user", "content": self._schedule_prompt_ko(context)}],
-            max_tokens=1000,
+            max_tokens=3000,
         )
-        text = response.choices[0].message.content.strip()
-        return self._safe_json_loads(text)
+        return self._safe_json_loads(response.choices[0].message.content)
 
     def _gemini_schedule(self, context: dict) -> dict:
         try:
             import google.generativeai as genai
         except ImportError as exc:
-            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
+            raise RuntimeError("google-generativeai 패키지가 없습니다. pip install google-generativeai 를 실행해주세요.") from exc
 
         genai.configure(api_key=self.api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(self._schedule_prompt_ko(context))
-        text = response.text.strip()
-        return self._safe_json_loads(text)
+        return self._safe_json_loads(response.text)
 
     def _schedule_instructions_en(self) -> str:
         return (
             "You are a realistic Korean study planner. "
             "Use only the provided app data. Do not invent tasks. "
-            "Decide whether the remaining plan is realistically achievable from now. "
-            "If all remaining tasks do not fit, say so honestly and schedule only the realistic amount. "
             "Only use editable_block_keys. Never schedule protected_block_keys. "
-            "Use todo_id 0 for a block that should stay empty for rest, buffer, or recovery. "
-            "Editable blocks omitted from schedule will be left empty. "
+            "Use todo_id 0 for rest, buffer, or recovery. "
             "Return concise Korean reasons."
         )
 
@@ -199,24 +190,18 @@ class AIFeedbackService:
         return (
             "너는 현실적인 한국어 공부 일정 관리자야.\n"
             "제공된 앱 데이터만 사용해. 없는 할 일은 만들지 마.\n"
-            "남은 계획이 지금부터 현실적으로 가능한지 판단해.\n"
-            "모든 일이 남은 시간 안에 안 들어가면 솔직히 말하고 가능한 만큼만 배정해.\n"
-            "반드시 editable_block_keys에 있는 block_key만 사용해.\n"
+            "editable_block_keys에 있는 block_key만 사용해.\n"
             "protected_block_keys에는 절대 배정하지 마.\n"
             "휴식, 여유, 회복 시간은 todo_id를 0으로 사용해.\n"
             "반드시 JSON만 출력해. JSON 밖에 설명을 쓰지 마.\n"
-            "모든 문자열은 반드시 큰따옴표를 사용해. 작은따옴표는 절대 사용하지 마.\n\n"
+            "모든 문자열은 반드시 큰따옴표를 사용해.\n"
+            "schedule은 최대 12개 블록만 출력해.\n\n"
             "JSON 형식:\n"
             "{\n"
             '  "summary": "요약",\n'
             '  "realistic_reason": "현실성 판단 이유",\n'
             '  "schedule": [\n'
-            '    {\n'
-            '      "block_key": "블록키",\n'
-            '      "todo_id": 0,\n'
-            '      "label": "휴식",\n'
-            '      "reason": "이유"\n'
-            '    }\n'
+            '    {"block_key": "02:30", "todo_id": 1, "label": "공부", "reason": "이유"}\n'
             "  ]\n"
             "}\n\n"
             f"앱 데이터:\n{json.dumps(context, ensure_ascii=False)}"
@@ -229,31 +214,98 @@ class AIFeedbackService:
             text = re.sub(r"^```(?:json)?", "", text).strip()
             text = re.sub(r"```$", "", text).strip()
 
-        match = re.search(r"\{[\s\S]*\}", text)
-        if not match:
-            raise RuntimeError(f"AI가 JSON 형식으로 답하지 않았습니다:\n{text}")
+        start = text.find("{")
+        end = text.rfind("}")
 
-        return match.group(0)
+        if start == -1:
+            raise ValueError("JSON 시작 기호를 찾지 못했습니다.")
+
+        if end == -1 or end <= start:
+            text = text[start:] + "\n}"
+
+            open_brackets = text.count("[")
+            close_brackets = text.count("]")
+            if open_brackets > close_brackets:
+                text = text.rstrip("}") + "]\n}"
+
+            return text
+
+        return text[start:end + 1]
 
     def _safe_json_loads(self, text: str) -> dict:
-        json_text = self._extract_json(text)
-
         try:
-            return json.loads(json_text)
+            json_text = self._extract_json(text)
         except Exception:
-            pass
+            return self._fallback_schedule()
 
-        try:
-            return ast.literal_eval(json_text)
-        except Exception:
-            pass
+        candidates = []
 
-        fixed = json_text
-        fixed = fixed.replace("'", '"')
+        candidates.append(json_text)
+
+        fixed = json_text.replace("'", '"')
         fixed = re.sub(r",\s*}", "}", fixed)
         fixed = re.sub(r",\s*]", "]", fixed)
+        candidates.append(fixed)
 
-        try:
-            return json.loads(fixed)
-        except Exception as exc:
-            raise RuntimeError(f"AI JSON 복구 실패\n\n원본:\n{json_text}") from exc
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+                return self._normalize_schedule(data)
+            except Exception:
+                pass
+
+            try:
+                data = ast.literal_eval(candidate)
+                return self._normalize_schedule(data)
+            except Exception:
+                pass
+
+        return self._fallback_schedule()
+
+    def _normalize_schedule(self, data: dict) -> dict:
+        if not isinstance(data, dict):
+            return self._fallback_schedule()
+
+        summary = str(data.get("summary", "AI가 시간표 제안을 생성했습니다."))
+        realistic_reason = str(data.get("realistic_reason", "현실적인 범위에서 일부 일정만 제안했습니다."))
+        schedule = data.get("schedule", [])
+
+        if not isinstance(schedule, list):
+            schedule = []
+
+        cleaned = []
+        for item in schedule:
+            if not isinstance(item, dict):
+                continue
+
+            block_key = str(item.get("block_key", "")).strip()
+            try:
+                todo_id = int(item.get("todo_id", 0))
+            except Exception:
+                todo_id = 0
+
+            label = str(item.get("label", ""))
+            reason = str(item.get("reason", ""))
+
+            if not block_key:
+                continue
+
+            cleaned.append({
+                "block_key": block_key,
+                "todo_id": todo_id,
+                "label": label,
+                "reason": reason,
+            })
+
+        return {
+            "summary": summary,
+            "realistic_reason": realistic_reason,
+            "schedule": cleaned,
+        }
+
+    def _fallback_schedule(self) -> dict:
+        return {
+            "summary": "AI가 시간표 제안을 만들었지만 JSON 형식이 불안정해 자동 적용하지 않았습니다.",
+            "realistic_reason": "Hugging Face 또는 Gemini 모델은 JSON 출력이 가끔 깨질 수 있습니다. OpenAI 키를 사용하면 더 안정적입니다.",
+            "schedule": [],
+        }
