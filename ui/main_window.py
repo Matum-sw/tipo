@@ -1205,6 +1205,109 @@ class MainWindow(QMainWindow):
         if hasattr(self, "brain_dump"):
             self.store.save_brain_dump(self.day, self.brain_dump.toPlainText())
 
+    @staticmethod
+    def block_start_minutes(block_key: str) -> int:
+        hour, minute = map(int, block_key.split(":"))
+        return hour * 60 + minute
+
+    @staticmethod
+    def block_end_label(block_key: str) -> str:
+        total = MainWindow.block_start_minutes(block_key) + 10
+        hour, minute = divmod(total, 60)
+        return f"{hour:02d}:{minute:02d}"
+
+    def summarize_todo_ranges(self, todo_id: int, blocks: dict[str, int]) -> str:
+        keys = [key for key in ALL_BLOCK_KEYS if blocks.get(key) == todo_id]
+        if not keys:
+            return "계획 구간 없음"
+
+        ranges = []
+        start = keys[0]
+        previous = keys[0]
+        previous_idx = BLOCK_KEY_INDEX[previous]
+
+        for key in keys[1:]:
+            idx = BLOCK_KEY_INDEX[key]
+            if idx == previous_idx + 1:
+                previous = key
+                previous_idx = idx
+                continue
+            ranges.append(f"{start}~{self.block_end_label(previous)}")
+            start = previous = key
+            previous_idx = idx
+
+        ranges.append(f"{start}~{self.block_end_label(previous)}")
+        return ", ".join(ranges)
+
+    def current_prompt_context(self) -> dict:
+        now = datetime.now()
+        current_block_key = f"{now.hour:02d}:{(now.minute // 10) * 10:02d}"
+        blocks = self.store.blocks_for_day(self.day)
+        todos = {todo.id: todo for todo in self.store.todos_for_day(self.day)}
+        records = self.store.timer_records_for_day(self.day)
+
+        current_todo_id = self.running["todo_id"] if self.running else blocks.get(current_block_key)
+        current_todo = todos.get(current_todo_id) if current_todo_id else None
+
+        planned_minutes = 0
+        actual_focus_seconds = 0
+        planned_ranges = "계획 구간 없음"
+        current_task = "현재 시간에 배치된 작업 없음"
+
+        if current_todo:
+            planned_minutes = sum(1 for todo_id in blocks.values() if todo_id == current_todo.id) * 10
+            planned_ranges = self.summarize_todo_ranges(current_todo.id, blocks)
+            current_task = f"{current_todo.subject_name} / {current_todo.title}"
+            actual_focus_seconds = sum(
+                int(record["seconds"] or 0)
+                for record in records
+                if record["todo_id"] == current_todo.id and record["event_type"] == "focus"
+            )
+
+        if self.running and self.running.get("mode") == "focus" and self.running.get("segment_started_at"):
+            actual_focus_seconds += max(0, int(time.time() - self.running["segment_started_at"]))
+
+        current_minutes = self.block_start_minutes(current_block_key)
+        remaining_block_keys = [key for key in ALL_BLOCK_KEYS if self.block_start_minutes(key) >= current_minutes]
+        remaining_planned_blocks = [key for key in remaining_block_keys if blocks.get(key)]
+        remaining_empty_blocks = [key for key in remaining_block_keys if not blocks.get(key)]
+        protected_blocks = [
+            key
+            for key in remaining_block_keys
+            if blocks.get(key) and self.store.block_has_timer_records(self.day, key)
+        ]
+
+        remaining_open_todos = []
+        for todo in todos.values():
+            if todo.status == "done":
+                continue
+            todo_planned_after_now = sum(
+                1
+                for key in remaining_block_keys
+                if blocks.get(key) == todo.id
+            ) * 10
+            remaining_open_todos.append(f"{todo.subject_name} / {todo.title} ({todo.status}, 이후 계획 {todo_planned_after_now}분)")
+
+        editable_start = self.block_end_label(current_block_key) if now.minute % 10 or now.second else current_block_key
+        editable_range = f"{editable_start} 이후, 실제 타이머 기록이 없는 블록"
+        actual_focus_minutes = round(actual_focus_seconds / 60)
+
+        return {
+            "now": now.strftime("%Y-%m-%d %H:%M"),
+            "current_block_key": current_block_key,
+            "timer_mode": self.running["mode"] if self.running else "실행 중 아님",
+            "current_task": current_task,
+            "current_task_planned_ranges": planned_ranges,
+            "current_task_planned_minutes": planned_minutes,
+            "current_task_actual_focus_minutes": actual_focus_minutes,
+            "current_task_delta_minutes": actual_focus_minutes - planned_minutes,
+            "editable_range": editable_range,
+            "remaining_planned_minutes": len(remaining_planned_blocks) * 10,
+            "remaining_empty_minutes": len(remaining_empty_blocks) * 10,
+            "remaining_open_todos": "; ".join(remaining_open_todos) if remaining_open_todos else "미완료 To Do 없음",
+            "protected_blocks": ", ".join(protected_blocks[:20]),
+        }
+
     def change_date(self, qdate: QDate) -> None:
         if self.running:
             self._force_stop_timer()
@@ -1473,7 +1576,7 @@ class MainWindow(QMainWindow):
             }
             for day in days
         ]
-        prompt = build_ai_coaching_prompt(self.day, snapshots)
+        prompt = build_ai_coaching_prompt(self.day, snapshots, self.current_prompt_context())
         QApplication.clipboard().setText(prompt)
 
         QMessageBox.information(

@@ -164,6 +164,60 @@ def _format_event_counts(counts: dict[str, int]) -> str:
     )
 
 
+def _app_context_for_prompt() -> list[str]:
+    return [
+        "## 프로그램 핵심 구조와 화면 설명",
+        "- 이 앱은 PySide6 기반 데일리 타임박싱 플래너입니다.",
+        "- 화면은 크게 To Do List, Brain Dump, Time Plan, Timer, Study Stats 영역으로 구성됩니다.",
+        "- To Do List: 공부할 일이나 생활 일정을 과목별로 등록하고 선택하는 영역입니다.",
+        "- Brain Dump: 걱정, 아이디어, 나중에 정리할 일을 자유롭게 적는 메모 영역입니다.",
+        "- Time Plan: 하루 24시간을 10분 단위 블록으로 나눈 계획표입니다.",
+        "- Timer: 현재 시간에 해당하는 Time Plan 블록의 할 일을 찾아 뽀모도로 타이머를 실행합니다.",
+        "- Study Stats: 타이머로 실제 기록된 집중/휴식 시간을 집계합니다.",
+        "",
+        "## Time Plan 그리드 규칙",
+        "- 블록 키는 `HH:MM` 형식입니다. 예: `10:20`은 10:20~10:30 블록입니다.",
+        "- 한 블록은 10분입니다.",
+        "- 같은 할 일이 연속된 블록에 배치되면 하나의 작업 구간으로 해석합니다.",
+        "- 현재 시간 이전 블록과 실제 타이머 기록이 있는 블록은 보존해야 합니다.",
+        "- 계획 수정 제안은 현재 시간 이후 블록에 대해서만 해주세요.",
+        "- 빈 시간이 부족하면 무리해서 밀어 넣지 말고 미룸/축소/분할을 제안해주세요.",
+        "",
+        "## 버튼과 행동 의미",
+        "- `추가`: 새 To Do를 만듭니다.",
+        "- To Do 클릭: 해당 To Do를 선택합니다.",
+        "- Time Plan 블록 클릭/드래그: 선택한 To Do를 해당 10분 블록들에 배치합니다.",
+        "- `추가 모드`: 블록을 채우는 기본 모드입니다.",
+        "- `삭제 모드`: 타이머 기록이 없는 계획 블록을 지우는 모드입니다.",
+        "- `전체 삭제`: 오늘 계획 중 실제 타이머 기록이 없는 블록만 삭제합니다.",
+        "- Timer `실행`: 현재 시간에 걸친 Time Plan 할 일을 찾아 집중 타이머를 시작하거나 재개합니다.",
+        "- Timer `일시정지`: 집중 중인 타이머를 멈춥니다.",
+        "- Timer `건너뛰기`: 휴식/긴 휴식 중 남은 휴식을 건너뜁니다.",
+        "- Timer `종료`: 현재 세션을 저장하고 타이머를 종료합니다.",
+        "- Timer `완료`: 현재 또는 선택된 To Do를 완료 처리합니다.",
+        "- `Markdown`: 아래 데이터를 바탕으로 GPT에 붙여넣을 개인화 피드백 프롬프트를 복사합니다.",
+        "- `AI 피드백`: 현재 코드에서는 실제 API 호출 없이 안내/placeholder 용도로 쓰입니다.",
+        "",
+        "## 타이머와 휴식 규칙",
+        "- 기본 집중 시간은 설정값 기준이며 보통 25분입니다.",
+        "- 기본 휴식 시간은 설정값 기준이며 보통 5분입니다.",
+        "- 여러 스프린트 후 긴 휴식이 들어갈 수 있습니다.",
+        "- 휴식을 자주 건너뛰거나 긴 연속 집중이 반복되면 번아웃 위험 신호로 해석해주세요.",
+        "- 실제 집중 기록은 계획표보다 중요합니다. 계획은 많지만 실행이 적으면 계획 과부하로 판단해주세요.",
+        "",
+        "## GPT가 제안해야 하는 계획표 수정 방식",
+        "- 추상적인 조언만 하지 말고, 가능한 경우 구체적인 블록 수정안을 제안해주세요.",
+        "- 수정안은 `HH:MM~HH:MM | 과목 | 할 일 | 이유` 형식을 사용해주세요.",
+        "- 답변은 긴 문단보다 표와 짧은 bullet 위주로 작성해주세요.",
+        "- 계획표 수정안은 반드시 Markdown 표로 보여주세요.",
+        "- 표는 시간순으로 정렬하고, 한눈에 볼 수 있게 시간/과목/할 일/조정 유형/이유를 분리해주세요.",
+        "- 휴식도 계획에 포함해주세요. 예: `11:20~11:30 | 휴식 | 짧은 휴식 | 집중 40분 뒤 회복`.",
+        "- 어려운 과목은 너무 긴 연속 블록으로 제안하지 말고 분할 배치해주세요.",
+        "- Brain Dump에 불안/잡생각이 많으면 짧은 정리 시간이나 쉬운 작업을 먼저 제안해주세요.",
+        "- 사용자의 최근 성공 시간대와 과목별 실제 집중 패턴을 우선 반영해주세요.",
+    ]
+
+
 def _summarize_blocks(blocks: dict[str, int], todos_by_id: dict[int, object]) -> list[str]:
     if not blocks:
         return ["- 계획 블록 없음"]
@@ -206,7 +260,50 @@ def _burnout_signals(records: list[dict], totals: dict[str, int]) -> list[str]:
     return signals
 
 
-def build_ai_coaching_prompt(day: str, snapshots: list[dict]) -> str:
+def _format_current_context(context: dict | None) -> list[str]:
+    if not context:
+        return [
+            "## 현재 상황과 재분배 기준",
+            "- 현재 실행 상황 정보 없음: 아래 계획표/기록만 근거로 현재 시간 이후 재분배를 제안해주세요.",
+        ]
+
+    lines = [
+        "## 현재 상황과 재분배 기준",
+        f"- 현재 시각: {context.get('now', '알 수 없음')}",
+        f"- 현재 10분 블록: {context.get('current_block_key', '알 수 없음')}",
+        f"- 현재 타이머 상태: {context.get('timer_mode', '실행 중 아님')}",
+        f"- 현재/해당 블록 작업: {context.get('current_task', '현재 시간에 배치된 작업 없음')}",
+        f"- 현재 작업 원래 계획 구간: {context.get('current_task_planned_ranges', '계획 구간 없음')}",
+        f"- 현재 작업 원래 계획 시간: {context.get('current_task_planned_minutes', 0)}분",
+        f"- 현재 작업 실제 집중 시간: {context.get('current_task_actual_focus_minutes', 0)}분",
+        f"- 현재 작업 계획 대비 초과/부족: {context.get('current_task_delta_minutes', 0)}분",
+        f"- 현재 이후 수정 가능 범위: {context.get('editable_range', '현재 시간 이후, 타이머 기록 없는 블록')}",
+        f"- 현재 이후 남은 계획 블록: {context.get('remaining_planned_minutes', 0)}분",
+        f"- 현재 이후 빈 블록: {context.get('remaining_empty_minutes', 0)}분",
+        f"- 오늘 남은 미완료 To Do: {context.get('remaining_open_todos', '미완료 To Do 없음')}",
+    ]
+
+    protected = context.get("protected_blocks", "")
+    if protected:
+        lines.append(f"- 수정 금지 블록: {protected}")
+
+    lines.extend(
+        [
+            "",
+            "### 재분배 판단 방법",
+            "- 현재 작업이 계획보다 초과 중이면, 뒤 작업을 무조건 밀어붙이지 말고 다음 세 가지를 비교해주세요.",
+            "- 1) 현재 작업을 짧게 마무리하고 뒤 작업 유지",
+            "- 2) 뒤 작업 시간을 줄이고 핵심만 남김",
+            "- 3) 뒤 작업 일부를 미룸 처리하고 휴식/회복 시간을 확보",
+            "- 오늘 안에 끝내야 하는 일이 많으면, 모든 작업을 균등하게 줄이지 말고 중요도와 최근 성공 패턴을 기준으로 줄여주세요.",
+            "- `현재 이후 빈 블록`과 `현재 이후 남은 계획 블록`을 합쳐서 현실적인 재배치안을 만드세요.",
+            "- 계획 대비 초과 시간이 크면 최소 10분 휴식을 먼저 넣는 선택지도 검토하세요.",
+        ]
+    )
+    return lines
+
+
+def build_ai_coaching_prompt(day: str, snapshots: list[dict], current_context: dict | None = None) -> str:
     current = next((snapshot for snapshot in snapshots if snapshot["day"] == day), snapshots[0])
     current_todos = current["todos"]
     current_records = current["records"]
@@ -237,6 +334,10 @@ def build_ai_coaching_prompt(day: str, snapshots: list[dict]) -> str:
         "",
         "아래 데이터는 내 로컬 플래너에서 Markdown 버튼으로 복사한 사용 기록입니다.",
         "개인정보를 추정하거나 없는 사실을 만들지 말고, 제공된 데이터만 근거로 한국어로 답해주세요.",
+        "",
+        *_app_context_for_prompt(),
+        "",
+        *_format_current_context(current_context),
         "",
         "## AI에게 요청할 일",
         "- 오늘의 강점 1개, 병목 1개, 바로 할 다음 행동 1개를 제안해주세요.",
@@ -305,9 +406,11 @@ def build_ai_coaching_prompt(day: str, snapshots: list[dict]) -> str:
             "",
             "## 출력 형식",
             "1. 오늘의 한 줄 진단",
-            "2. 내 패턴에서 보이는 강점",
-            "3. 병목/번아웃 위험",
-            "4. 현재 시간 이후 계획표 수정안",
+            "2. 핵심 요약 표: 강점/병목/번아웃 위험/우선순위",
+            "3. 현재 시간 이후 계획표 수정안: Markdown 표로 작성",
+            "   - 표 컬럼: `시간`, `과목`, `할 일`, `조정 유형`, `이유`",
+            "   - 조정 유형 예시: 유지, 축소, 이동, 분할, 휴식 추가, 미룸",
+            "4. 변경 전후 비교 표: 기존 계획과 추천 계획의 차이",
             "5. 바로 실행할 다음 행동 1개",
         ]
     )
