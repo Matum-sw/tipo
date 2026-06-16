@@ -190,6 +190,32 @@ QPushButton:hover {
   color: #7baeff;
 }
 
+#StatsSoftButton {
+  background: #1a2c4a;
+  color: #7baeff;
+  padding: 4px 10px;
+  min-height: 0;
+  font-size: 13px;
+  border-radius: 14px;
+}
+
+#StatsSoftButton:hover {
+  background: #1e3a60;
+}
+
+#StatsPrimaryButton {
+  background: #3f7df1;
+  color: white;
+  padding: 4px 10px;
+  min-height: 0;
+  font-size: 13px;
+  border-radius: 14px;
+}
+
+#StatsPrimaryButton:hover {
+  background: #5a9aff;
+}
+
 #SubjectButton {
   background: #1a2030;
   border: 1px solid #2a3650;
