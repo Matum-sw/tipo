@@ -29,10 +29,13 @@ REALISTIC_SCHEDULE_SCHEMA = {
 
 
 class AIFeedbackService:
-    """Small adapter kept separate so the UI is not coupled to an API vendor."""
-
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "") or os.getenv("HUGGINGFACE_API_KEY", "")
+        self.api_key = (
+            api_key
+            or os.getenv("OPENAI_API_KEY", "")
+            or os.getenv("HUGGINGFACE_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+        )
 
     def set_api_key(self, api_key: str) -> None:
         self.api_key = api_key.strip()
@@ -45,6 +48,8 @@ class AIFeedbackService:
             return "openai"
         if self.api_key.startswith("hf_") or self.api_key.startswith("hf-"):
             return "huggingface"
+        if self.api_key.startswith("AIza"):
+            return "gemini"
         return "unknown"
 
     def build_prompt(self, markdown_report: str) -> str:
@@ -59,32 +64,37 @@ class AIFeedbackService:
             return "API 키가 설정되면 이 리포트를 바탕으로 AI 피드백을 생성할 수 있습니다."
 
         prompt = self.build_prompt(markdown_report)
+        provider = self.provider()
 
-        if self.provider() == "openai":
+        if provider == "openai":
             return self._openai_feedback(prompt)
-
-        if self.provider() == "huggingface":
+        if provider == "huggingface":
             return self._huggingface_feedback(prompt)
+        if provider == "gemini":
+            return self._gemini_feedback(prompt)
 
-        raise ValueError("지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_ 로 시작해야 합니다.")
+        raise ValueError("지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다.")
 
     def generate_realistic_schedule(self, context: dict) -> dict:
         if not self.is_configured():
             raise ValueError("API 키가 필요합니다.")
 
-        if self.provider() == "openai":
+        provider = self.provider()
+
+        if provider == "openai":
             return self._openai_schedule(context)
-
-        if self.provider() == "huggingface":
+        if provider == "huggingface":
             return self._huggingface_schedule(context)
+        if provider == "gemini":
+            return self._gemini_schedule(context)
 
-        raise ValueError("지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_ 로 시작해야 합니다.")
+        raise ValueError("지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다.")
 
     def _openai_feedback(self, prompt: str) -> str:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. requirements.txt를 설치해주세요.") from exc
+            raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. pip install openai 를 실행해주세요.") from exc
 
         client = OpenAI(api_key=self.api_key)
 
@@ -106,34 +116,36 @@ class AIFeedbackService:
 
         response = client.chat.completions.create(
             model="Qwen/Qwen2.5-7B-Instruct",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=700,
         )
 
         return response.choices[0].message.content
 
+    def _gemini_feedback(self, prompt: str) -> str:
+        try:
+            import google.generativeai as genai
+        except ImportError as exc:
+            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
+
+        genai.configure(api_key=self.api_key)
+
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+
+        return response.text
+
     def _openai_schedule(self, context: dict) -> dict:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. requirements.txt를 설치해주세요.") from exc
+            raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. pip install openai 를 실행해주세요.") from exc
 
         client = OpenAI(api_key=self.api_key)
 
         response = client.responses.create(
             model="gpt-4.1-mini",
-            instructions=(
-                "You are a realistic Korean study planner. "
-                "Use only the provided app data. Do not invent tasks. "
-                "Decide whether the remaining plan is realistically achievable from now. "
-                "If all remaining tasks do not fit, say so honestly and schedule only the realistic amount. "
-                "Only use editable_block_keys. Never schedule protected_block_keys. "
-                "Use todo_id 0 for a block that should stay empty for rest, buffer, or recovery. "
-                "Editable blocks omitted from schedule will be left empty. "
-                "Return concise Korean reasons."
-            ),
+            instructions=self._schedule_instructions_en(),
             input=json.dumps(context, ensure_ascii=False),
             text={
                 "format": {
@@ -155,7 +167,43 @@ class AIFeedbackService:
 
         client = InferenceClient(api_key=self.api_key)
 
-        prompt = (
+        response = client.chat.completions.create(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            messages=[{"role": "user", "content": self._schedule_prompt_ko(context)}],
+            max_tokens=1000,
+        )
+
+        text = response.choices[0].message.content.strip()
+        return json.loads(self._extract_json(text))
+
+    def _gemini_schedule(self, context: dict) -> dict:
+        try:
+            import google.generativeai as genai
+        except ImportError as exc:
+            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
+
+        genai.configure(api_key=self.api_key)
+
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(self._schedule_prompt_ko(context))
+
+        text = response.text.strip()
+        return json.loads(self._extract_json(text))
+
+    def _schedule_instructions_en(self) -> str:
+        return (
+            "You are a realistic Korean study planner. "
+            "Use only the provided app data. Do not invent tasks. "
+            "Decide whether the remaining plan is realistically achievable from now. "
+            "If all remaining tasks do not fit, say so honestly and schedule only the realistic amount. "
+            "Only use editable_block_keys. Never schedule protected_block_keys. "
+            "Use todo_id 0 for a block that should stay empty for rest, buffer, or recovery. "
+            "Editable blocks omitted from schedule will be left empty. "
+            "Return concise Korean reasons."
+        )
+
+    def _schedule_prompt_ko(self, context: dict) -> str:
+        return (
             "너는 현실적인 한국어 공부 일정 관리자야.\n"
             "제공된 앱 데이터만 사용해. 없는 할 일은 만들지 마.\n"
             "남은 계획이 지금부터 현실적으로 가능한지 판단해.\n"
@@ -174,19 +222,6 @@ class AIFeedbackService:
             "}\n\n"
             f"앱 데이터:\n{json.dumps(context, ensure_ascii=False)}"
         )
-
-        response = client.chat.completions.create(
-            model="Qwen/Qwen2.5-7B-Instruct",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-        )
-
-        text = response.choices[0].message.content.strip()
-        text = self._extract_json(text)
-
-        return json.loads(text)
 
     def _extract_json(self, text: str) -> str:
         match = re.search(r"\{[\s\S]*\}", text)
