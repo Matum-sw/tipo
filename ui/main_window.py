@@ -1311,28 +1311,28 @@ class MainWindow(QMainWindow):
         }
 
     def ensure_openai_api_key(self) -> bool:
-    if self.ai.is_configured():
+        if self.ai.is_configured():
+            return True
+
+        api_key, ok = QInputDialog.getText(
+            self,
+            "AI API 키",
+            "AI 재조정을 실행할 API 키를 입력하세요.\n\n"
+            "지원 API:\n"
+            "- OpenAI (sk-...)\n"
+            "- Gemini (AIza...)\n"
+            "- Hugging Face (hf_...)\n\n"
+            "키는 이 PC의 앱 설정 DB에 저장됩니다.",
+            QLineEdit.Password,
+        )
+
+        if not ok or not api_key.strip():
+            return False
+
+        api_key = api_key.strip()
+        self.store.set_setting("openai_api_key", api_key)
+        self.ai.set_api_key(api_key)
         return True
-
-    api_key, ok = QInputDialog.getText(
-        self,
-        "AI API 키",
-        "AI 재조정을 실행할 API 키를 입력하세요.\n\n"
-        "지원 API:\n"
-        "- OpenAI (sk-...)\n"
-        "- Gemini (AIza...)\n"
-        "- Hugging Face (hf_...)\n\n"
-        "키는 이 PC의 앱 설정 DB에 저장됩니다.",
-        QLineEdit.Password,
-    )
-
-    if not ok or not api_key.strip():
-        return False
-
-    api_key = api_key.strip()
-    self.store.set_setting("openai_api_key", api_key)
-    self.ai.set_api_key(api_key)
-    return True
 
     def realistic_schedule_context(self) -> dict:
         now = datetime.now()
