@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import ast
 
 
 REALISTIC_SCHEDULE_SCHEMA = {
@@ -63,8 +64,8 @@ class AIFeedbackService:
         if not self.is_configured():
             return "API 키가 설정되면 이 리포트를 바탕으로 AI 피드백을 생성할 수 있습니다."
 
-        provider = self.provider()
         prompt = self.build_prompt(markdown_report)
+        provider = self.provider()
 
         if provider == "openai":
             return self._openai_feedback(prompt)
@@ -101,46 +102,36 @@ class AIFeedbackService:
             raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. pip install openai 를 실행해주세요.") from exc
 
         client = OpenAI(api_key=self.api_key)
-
         response = client.responses.create(
             model="gpt-4.1-mini",
             instructions="Give concise Korean feedback.",
             input=prompt,
         )
-
         return response.output_text
 
     def _huggingface_feedback(self, prompt: str) -> str:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
-            raise RuntimeError(
-                "huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요."
-            ) from exc
+            raise RuntimeError("huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요.") from exc
 
         client = InferenceClient(api_key=self.api_key)
-
         response = client.chat.completions.create(
             model="Qwen/Qwen2.5-7B-Instruct",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=700,
         )
-
         return response.choices[0].message.content
 
     def _gemini_feedback(self, prompt: str) -> str:
         try:
             import google.generativeai as genai
         except ImportError as exc:
-            raise RuntimeError(
-                "google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요."
-            ) from exc
+            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
 
         genai.configure(api_key=self.api_key)
-
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(prompt)
-
         return response.text
 
     def _openai_schedule(self, context: dict) -> dict:
@@ -150,7 +141,6 @@ class AIFeedbackService:
             raise RuntimeError("openai 패키지가 설치되어 있지 않습니다. pip install openai 를 실행해주세요.") from exc
 
         client = OpenAI(api_key=self.api_key)
-
         response = client.responses.create(
             model="gpt-4.1-mini",
             instructions=self._schedule_instructions_en(),
@@ -164,25 +154,20 @@ class AIFeedbackService:
                 }
             },
         )
-
         return json.loads(response.output_text)
 
     def _huggingface_schedule(self, context: dict) -> dict:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
-            raise RuntimeError(
-                "huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요."
-            ) from exc
+            raise RuntimeError("huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요.") from exc
 
         client = InferenceClient(api_key=self.api_key)
-
         response = client.chat.completions.create(
             model="Qwen/Qwen2.5-7B-Instruct",
             messages=[{"role": "user", "content": self._schedule_prompt_ko(context)}],
             max_tokens=1000,
         )
-
         text = response.choices[0].message.content.strip()
         return self._safe_json_loads(text)
 
@@ -190,15 +175,11 @@ class AIFeedbackService:
         try:
             import google.generativeai as genai
         except ImportError as exc:
-            raise RuntimeError(
-                "google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요."
-            ) from exc
+            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
 
         genai.configure(api_key=self.api_key)
-
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(self._schedule_prompt_ko(context))
-
         text = response.text.strip()
         return self._safe_json_loads(text)
 
@@ -223,8 +204,9 @@ class AIFeedbackService:
             "반드시 editable_block_keys에 있는 block_key만 사용해.\n"
             "protected_block_keys에는 절대 배정하지 마.\n"
             "휴식, 여유, 회복 시간은 todo_id를 0으로 사용해.\n"
-            "반드시 JSON만 출력해. JSON 밖에 설명을 쓰지 마.\n\n"
-            "JSON 형식 예시:\n"
+            "반드시 JSON만 출력해. JSON 밖에 설명을 쓰지 마.\n"
+            "모든 문자열은 반드시 큰따옴표를 사용해. 작은따옴표는 절대 사용하지 마.\n\n"
+            "JSON 형식:\n"
             "{\n"
             '  "summary": "요약",\n'
             '  "realistic_reason": "현실성 판단 이유",\n'
@@ -258,9 +240,20 @@ class AIFeedbackService:
 
         try:
             return json.loads(json_text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                "AI가 올바른 JSON 형식으로 답하지 않았습니다.\n"
-                f"오류 위치: line {exc.lineno}, column {exc.colno}\n\n"
-                f"AI 원문:\n{json_text}"
-            ) from exc
+        except Exception:
+            pass
+
+        try:
+            return ast.literal_eval(json_text)
+        except Exception:
+            pass
+
+        fixed = json_text
+        fixed = fixed.replace("'", '"')
+        fixed = re.sub(r",\s*}", "}", fixed)
+        fixed = re.sub(r",\s*]", "]", fixed)
+
+        try:
+            return json.loads(fixed)
+        except Exception as exc:
+            raise RuntimeError(f"AI JSON 복구 실패\n\n원본:\n{json_text}") from exc
