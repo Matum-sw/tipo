@@ -63,8 +63,8 @@ class AIFeedbackService:
         if not self.is_configured():
             return "API 키가 설정되면 이 리포트를 바탕으로 AI 피드백을 생성할 수 있습니다."
 
-        prompt = self.build_prompt(markdown_report)
         provider = self.provider()
+        prompt = self.build_prompt(markdown_report)
 
         if provider == "openai":
             return self._openai_feedback(prompt)
@@ -73,7 +73,9 @@ class AIFeedbackService:
         if provider == "gemini":
             return self._gemini_feedback(prompt)
 
-        raise ValueError("지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다.")
+        raise ValueError(
+            "지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다."
+        )
 
     def generate_realistic_schedule(self, context: dict) -> dict:
         if not self.is_configured():
@@ -88,7 +90,9 @@ class AIFeedbackService:
         if provider == "gemini":
             return self._gemini_schedule(context)
 
-        raise ValueError("지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다.")
+        raise ValueError(
+            "지원되지 않는 API 키 형식입니다. OpenAI는 sk-, Hugging Face는 hf_, Gemini는 AIza 로 시작해야 합니다."
+        )
 
     def _openai_feedback(self, prompt: str) -> str:
         try:
@@ -110,7 +114,9 @@ class AIFeedbackService:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
-            raise RuntimeError("huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요.") from exc
+            raise RuntimeError(
+                "huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요."
+            ) from exc
 
         client = InferenceClient(api_key=self.api_key)
 
@@ -126,7 +132,9 @@ class AIFeedbackService:
         try:
             import google.generativeai as genai
         except ImportError as exc:
-            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
+            raise RuntimeError(
+                "google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요."
+            ) from exc
 
         genai.configure(api_key=self.api_key)
 
@@ -163,7 +171,9 @@ class AIFeedbackService:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
-            raise RuntimeError("huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요.") from exc
+            raise RuntimeError(
+                "huggingface_hub 패키지가 설치되어 있지 않습니다. pip install huggingface_hub 를 실행해주세요."
+            ) from exc
 
         client = InferenceClient(api_key=self.api_key)
 
@@ -174,13 +184,15 @@ class AIFeedbackService:
         )
 
         text = response.choices[0].message.content.strip()
-        return json.loads(self._extract_json(text))
+        return self._safe_json_loads(text)
 
     def _gemini_schedule(self, context: dict) -> dict:
         try:
             import google.generativeai as genai
         except ImportError as exc:
-            raise RuntimeError("google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요.") from exc
+            raise RuntimeError(
+                "google-generativeai 패키지가 설치되어 있지 않습니다. pip install google-generativeai 를 실행해주세요."
+            ) from exc
 
         genai.configure(api_key=self.api_key)
 
@@ -188,7 +200,7 @@ class AIFeedbackService:
         response = model.generate_content(self._schedule_prompt_ko(context))
 
         text = response.text.strip()
-        return json.loads(self._extract_json(text))
+        return self._safe_json_loads(text)
 
     def _schedule_instructions_en(self) -> str:
         return (
@@ -212,19 +224,43 @@ class AIFeedbackService:
             "protected_block_keys에는 절대 배정하지 마.\n"
             "휴식, 여유, 회복 시간은 todo_id를 0으로 사용해.\n"
             "반드시 JSON만 출력해. JSON 밖에 설명을 쓰지 마.\n\n"
-            "출력 형식:\n"
+            "JSON 형식 예시:\n"
             "{\n"
             '  "summary": "요약",\n'
             '  "realistic_reason": "현실성 판단 이유",\n'
             '  "schedule": [\n'
-            '    {"block_key": "블록키", "todo_id": 0, "label": "휴식", "reason": "이유"}\n'
+            '    {\n'
+            '      "block_key": "블록키",\n'
+            '      "todo_id": 0,\n'
+            '      "label": "휴식",\n'
+            '      "reason": "이유"\n'
+            '    }\n'
             "  ]\n"
             "}\n\n"
             f"앱 데이터:\n{json.dumps(context, ensure_ascii=False)}"
         )
 
     def _extract_json(self, text: str) -> str:
+        text = text.strip()
+
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?", "", text).strip()
+            text = re.sub(r"```$", "", text).strip()
+
         match = re.search(r"\{[\s\S]*\}", text)
         if not match:
             raise RuntimeError(f"AI가 JSON 형식으로 답하지 않았습니다:\n{text}")
+
         return match.group(0)
+
+    def _safe_json_loads(self, text: str) -> dict:
+        json_text = self._extract_json(text)
+
+        try:
+            return json.loads(json_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "AI가 올바른 JSON 형식으로 답하지 않았습니다.\n"
+                f"오류 위치: line {exc.lineno}, column {exc.colno}\n\n"
+                f"AI 원문:\n{json_text}"
+            ) from exc
