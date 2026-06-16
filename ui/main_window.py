@@ -448,17 +448,12 @@ class MainWindow(QMainWindow):
         subject_stats_btn.setObjectName("SoftButton")
         subject_stats_btn.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
         subject_stats_btn.clicked.connect(self.show_subject_stats)
-        report_button = QPushButton("Markdown")
-        report_button.setObjectName("PrimaryButton")
-        report_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
-        report_button.clicked.connect(self.generate_report)
-        ai_button = QPushButton("AI 재조정")
-        ai_button.setObjectName("GhostButton")
-        ai_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
-        ai_button.clicked.connect(self.show_realistic_schedule)
+        adjust_button = QPushButton("AI 시간표 재조정")
+        adjust_button.setObjectName("PrimaryButton")
+        adjust_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px;")
+        adjust_button.clicked.connect(self.show_schedule_adjustment_choices)
         report_actions.addWidget(subject_stats_btn)
-        report_actions.addWidget(report_button)
-        report_actions.addWidget(ai_button)
+        report_actions.addWidget(adjust_button)
         card.layout.addLayout(report_actions)
 
     # ── Todo ──────────────────────────────────────────────────────────────────
@@ -1717,11 +1712,28 @@ class MainWindow(QMainWindow):
 
         QMessageBox.information(
             self,
-            "리포트 생성",
-            "Markdown 리포트를 생성하고, GPT 붙여넣기용 개인화 피드백 프롬프트를 복사했습니다.\n"
+            "직접 재조정",
+            "Markdown 리포트를 생성하고, GPT 붙여넣기용 개인화 재조정 프롬프트를 복사했습니다.\n"
             f"{path}",
         )
         return markdown
+
+    def show_schedule_adjustment_choices(self) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("AI 시간표 재조정")
+        box.setText("시간표 재조정 방식을 선택하세요.")
+        box.setInformativeText("직접 재조정은 Markdown 프롬프트를 복사하고, 자동 재조정은 OpenAI API로 바로 제안합니다.")
+        manual_button = box.addButton("직접 재조정", QMessageBox.AcceptRole)
+        auto_button = box.addButton("자동 재조정", QMessageBox.ActionRole)
+        box.addButton("취소", QMessageBox.RejectRole)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == manual_button:
+            self.generate_report()
+        elif clicked == auto_button:
+            self.show_realistic_schedule()
 
     def show_realistic_schedule(self) -> None:
         self.log_event("realistic_schedule_clicked")
