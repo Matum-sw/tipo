@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
         self.time_grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.time_grid = QGridLayout(self.time_grid_widget)
         _ROW_H = 52      # 1시간 행 높이: 한 행 안에 10분 블록 6개를 가로로 배치
-        _V_GAP  = 0      # 시간 행 사이 간격은 테두리로만 구분
+        _V_GAP  = 3      # 시간 행 사이에 보이는 간격
 
         self.time_grid.setHorizontalSpacing(0)
         self.time_grid.setVerticalSpacing(_V_GAP)
