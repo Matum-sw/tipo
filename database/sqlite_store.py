@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from core.models import Subject, Todo
 from core.paths import DATA_DIR, DB_FILE
@@ -33,6 +33,7 @@ class SQLiteStore:
                 title TEXT NOT NULL,
                 subject_id INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
+                planned_minutes INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(subject_id) REFERENCES subjects(id)
             );
@@ -85,6 +86,13 @@ class SQLiteStore:
             """
         )
         self.connection.commit()
+        self._ensure_column("todos", "planned_minutes", "INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        existing = {row["name"] for row in self.connection.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            self.connection.commit()
 
     def now(self) -> str:
         return datetime.now().isoformat(timespec="seconds")
@@ -181,6 +189,7 @@ class SQLiteStore:
         rows = self.connection.execute(
             """
             SELECT todos.id, todos.day, todos.title, todos.subject_id, todos.status,
+                   todos.planned_minutes,
                    subjects.name AS subject_name, subjects.kind AS subject_kind
             FROM todos
             JOIN subjects ON subjects.id = todos.subject_id
@@ -212,7 +221,20 @@ class SQLiteStore:
 
     # ── Time Blocks ───────────────────────────────────────────────────────────
 
+    def _recalculate_planned_minutes(self, todo_id: int) -> None:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS count FROM time_blocks WHERE todo_id = ?", (todo_id,)
+        ).fetchone()
+        self.connection.execute(
+            "UPDATE todos SET planned_minutes = ? WHERE id = ?",
+            (row["count"] * 10, todo_id),
+        )
+
     def assign_block(self, day: str, block_key: str, todo_id: int) -> None:
+        previous = self.connection.execute(
+            "SELECT todo_id FROM time_blocks WHERE day = ? AND block_key = ?", (day, block_key)
+        ).fetchone()
+        previous_todo_id = previous["todo_id"] if previous else None
         self.connection.execute(
             """
             INSERT INTO time_blocks(day, block_key, todo_id)
@@ -221,29 +243,49 @@ class SQLiteStore:
             """,
             (day, block_key, todo_id),
         )
+        if previous_todo_id is not None and previous_todo_id != todo_id:
+            self._recalculate_planned_minutes(previous_todo_id)
+        self._recalculate_planned_minutes(todo_id)
         self.connection.commit()
 
     def delete_block(self, day: str, block_key: str) -> None:
+        previous = self.connection.execute(
+            "SELECT todo_id FROM time_blocks WHERE day = ? AND block_key = ?", (day, block_key)
+        ).fetchone()
         self.connection.execute(
             "DELETE FROM time_blocks WHERE day = ? AND block_key = ?", (day, block_key)
         )
+        if previous:
+            self._recalculate_planned_minutes(previous["todo_id"])
         self.connection.commit()
 
     def clear_blocks_for_day(self, day: str) -> None:
+        todo_ids = [
+            row["todo_id"]
+            for row in self.connection.execute(
+                "SELECT DISTINCT todo_id FROM time_blocks WHERE day = ?", (day,)
+            ).fetchall()
+        ]
         self.connection.execute("DELETE FROM time_blocks WHERE day = ?", (day,))
+        for todo_id in todo_ids:
+            self._recalculate_planned_minutes(todo_id)
         self.connection.commit()
 
     def clear_unprotected_blocks_for_day(self, day: str) -> None:
         """블록 시간대에 타이머가 실제로 작동한 블록만 보호하고 나머지 삭제."""
         blocks = self.connection.execute(
-            "SELECT block_key FROM time_blocks WHERE day = ?", (day,)
+            "SELECT block_key, todo_id FROM time_blocks WHERE day = ?", (day,)
         ).fetchall()
+        affected_todo_ids = set()
         for block in blocks:
             if not self.block_has_timer_records(day, block["block_key"]):
                 self.connection.execute(
                     "DELETE FROM time_blocks WHERE day = ? AND block_key = ?",
                     (day, block["block_key"]),
                 )
+                affected_todo_ids.add(block["todo_id"])
+        for todo_id in affected_todo_ids:
+            self._recalculate_planned_minutes(todo_id)
         self.connection.commit()
 
     def block_has_timer_records(self, day: str, block_key: str) -> bool:
@@ -405,3 +447,92 @@ class SQLiteStore:
 
     def today(self) -> str:
         return date.today().isoformat()
+
+    # ── Sample Data ───────────────────────────────────────────────────────────
+
+    def add_sample_data(self, day: str) -> None:
+        """Study Stats(도넛/과목별 통계)·TimePlan·ToDoList 등 모든 기능을 실제 사용한 것처럼
+        현재 시각 기준 완료/진행 중/예정 표본 데이터로 점검할 수 있게 추가."""
+        subjects = self.subjects(include_other=False)
+        if len(subjects) < 2:
+            existing_names = {s.name for s in subjects}
+            for name, difficulty in (("수학", "어려움"), ("영어", "보통")):
+                if name not in existing_names:
+                    self.add_subject(name, difficulty)
+            subjects = self.subjects(include_other=False)
+        subject_a, subject_b = subjects[0], subjects[1]
+
+        self.add_todo(day, "표본 — 완료한 공부", subject_a.id)
+        self.add_todo(day, "표본 — 진행 중인 공부", subject_b.id)
+        self.add_todo(day, "표본 — 앞으로 할 공부", subject_a.id)
+
+        sample_todos = {
+            todo.title: todo
+            for todo in self.todos_for_day(day)
+            if todo.title.startswith("표본 — ")
+        }
+        todo_done = sample_todos["표본 — 완료한 공부"]
+        todo_active = sample_todos["표본 — 진행 중인 공부"]
+        todo_upcoming = sample_todos["표본 — 앞으로 할 공부"]
+
+        # 모든 시각은 day 날짜 안쪽(0~23:50)으로 고정(clamp)한다.
+        # datetime.now() 기준으로 그냥 +/- timedelta를 하면 자정 근처에서 날짜가
+        # day와 달라져, TimePlan의 타이머 작동 오버레이(같은 날짜만 그림)와
+        # Study Stats의 합계가 서로 어긋나는 문제가 있었다.
+        day_date = date.fromisoformat(day)
+        day_midnight = datetime.combine(day_date, datetime.min.time())
+        now = datetime.now()
+        minute_of_day = now.hour * 60 + now.minute
+        current_block_minute = (minute_of_day // 10) * 10
+        is_today = day == date.today().isoformat()
+
+        def clamp_minute(m: int) -> int:
+            return max(0, min(1439, m))
+
+        def at_minute(m: int) -> datetime:
+            return day_midnight + timedelta(minutes=clamp_minute(m))
+
+        def block_key_for_minute(m: int) -> str:
+            m = max(0, min(1430, (clamp_minute(m) // 10) * 10))
+            return f"{m // 60:02d}:{m % 60:02d}"
+
+        def assign_range(start_minute: int, end_minute: int, todo_id: int) -> None:
+            cursor = (clamp_minute(start_minute) // 10) * 10
+            end_minute = (clamp_minute(end_minute) // 10) * 10
+            while cursor < end_minute:
+                self.assign_block(day, block_key_for_minute(cursor), todo_id)
+                cursor += 10
+
+        # 1) 이미 끝낸 일 — 1시간 전 ~ 30분 전, 완료 처리 + 실제 타이머(focus) 기록
+        done_start_m = current_block_minute - 60
+        done_end_m = current_block_minute - 30
+        assign_range(done_start_m, done_end_m, todo_done.id)
+        self.set_todo_status(todo_done.id, "done")
+        done_start, done_end = at_minute(done_start_m), at_minute(done_end_m)
+        if done_end > done_start:
+            self.add_timer_record(
+                day, todo_done.id, subject_a.id, block_key_for_minute(done_start_m), "focus",
+                int((done_end - done_start).total_seconds()),
+                done_start.isoformat(timespec="seconds"), done_end.isoformat(timespec="seconds"),
+                "sample-data-session",
+            )
+
+        # 2) 지금 진행 중인 일 — 현재 블록을 포함한 구간, 지금까지 경과한 실제 타이머(focus) 기록
+        active_start_m = current_block_minute - 10
+        active_end_m = current_block_minute + 20
+        assign_range(active_start_m, active_end_m, todo_active.id)
+        active_start = at_minute(active_start_m)
+        # day가 오늘이 아니면 "지금"이라는 개념이 없으므로 진행 구간이 끝난 것으로 간주한다.
+        active_now = now if is_today else at_minute(active_end_m)
+        elapsed = max(60, int((active_now - active_start).total_seconds()))
+        self.add_timer_record(
+            day, todo_active.id, subject_b.id, block_key_for_minute(active_start_m), "focus",
+            elapsed,
+            active_start.isoformat(timespec="seconds"), active_now.isoformat(timespec="seconds"),
+            "sample-data-session",
+        )
+
+        # 3) 앞으로 할 일 — 1~2시간 뒤, 계획만 존재(타이머 기록 없음)
+        upcoming_start_m = current_block_minute + 60
+        upcoming_end_m = current_block_minute + 120
+        assign_range(upcoming_start_m, upcoming_end_m, todo_upcoming.id)

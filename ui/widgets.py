@@ -17,19 +17,19 @@ from PySide6.QtWidgets import (
 
 
 class DonutChartWidget(QWidget):
-    """총 공부시간 / 총 작동시간 도넛 그래프 (배경=24시간 회색)."""
+    """일정 지정 시간(하늘색) 대비 타이머 작동 시간(파란색) 도넛 그래프 (배경=24시간 회색)."""
 
     DAY_SECONDS = 86400
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.focus_seconds = 0
+        self.scheduled_seconds = 0
         self.active_seconds = 0
         self.setMinimumSize(140, 140)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-    def set_data(self, focus_seconds: int, active_seconds: int) -> None:
-        self.focus_seconds = max(0, focus_seconds)
+    def set_data(self, scheduled_seconds: int, active_seconds: int) -> None:
+        self.scheduled_seconds = max(0, scheduled_seconds)
         self.active_seconds = max(0, active_seconds)
         self.update()
 
@@ -64,27 +64,27 @@ class DonutChartWidget(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(rect)
 
-        # 2. 총 작동시간
-        active_angle = min(360, int(self.active_seconds / self.DAY_SECONDS * 360))
-        if active_angle > 0:
+        # 2. 일정을 지정한 시간 (하늘색)
+        scheduled_angle = min(360, int(self.scheduled_seconds / self.DAY_SECONDS * 360))
+        if scheduled_angle > 0:
             pen.setColor(QColor("#3a78c8" if dark else "#93c5fd"))
+            painter.setPen(pen)
+            painter.drawArc(rect, 90 * 16, -scheduled_angle * 16)
+
+        # 3. 실제 타이머를 작동한 시간 (일정 범위 내에서 하늘색을 채워나감)
+        active_in_schedule = min(self.active_seconds, self.scheduled_seconds)
+        active_angle = min(360, int(active_in_schedule / self.DAY_SECONDS * 360))
+        if active_angle > 0:
+            pen.setColor(QColor("#5a9aff" if dark else "#3f7df1"))
             painter.setPen(pen)
             painter.drawArc(rect, 90 * 16, -active_angle * 16)
 
-        # 3. 총 공부시간 (위에 겹침)
-        focus_angle = min(360, int(self.focus_seconds / self.DAY_SECONDS * 360))
-        if focus_angle > 0:
-            pen.setColor(QColor("#5a9aff" if dark else "#3f7df1"))
-            painter.setPen(pen)
-            painter.drawArc(rect, 90 * 16, -focus_angle * 16)
-
-        # 4. 중앙 텍스트
-        focus_min = self.focus_seconds // 60
-        fh, fm = divmod(focus_min, 60)
-        line1 = f"{fh}h {fm}m" if fh else f"{fm}분"
-        active_min = self.active_seconds // 60
-        ah, am = divmod(active_min, 60)
-        line2 = f"/{ah}h {am}m" if ah else f"/{am}분"
+        # 4. 중앙 텍스트 — 일정 지정 시간 대비 타이머 작동시간 비율(%)
+        percent = int(round(active_in_schedule / self.scheduled_seconds * 100)) if self.scheduled_seconds else 0
+        line1 = f"{percent}%"
+        active_min = active_in_schedule // 60
+        scheduled_min = self.scheduled_seconds // 60
+        line2 = f"{active_min}/{scheduled_min}분"
 
         font1 = QFont(self.font())
         font1.setPointSize(11)

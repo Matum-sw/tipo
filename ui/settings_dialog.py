@@ -4,7 +4,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -32,9 +34,11 @@ SPIN_FIELDS = [
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, store, parent=None):
+    def __init__(self, store, day: str, on_sample_added=None, parent=None):
         super().__init__(parent)
         self.store = store
+        self.day = day
+        self.on_sample_added = on_sample_added
         self.data_reset = False
         self._spins: dict[str, dict] = {}   # key → {val, min, max, suffix, label}
 
@@ -84,6 +88,35 @@ class SettingsDialog(QDialog):
         form.addRow("테마", self.dark_mode_check)
 
         root.addLayout(form)
+
+        # ── AI API 키 ────────────────────────────────────────────────────────
+        api_key_row = QHBoxLayout()
+        self.api_key_status_label = QLabel()
+        self.api_key_status_label.setStyleSheet("font-weight: 700;")
+        api_key_change_btn = QPushButton("변경")
+        api_key_change_btn.setObjectName("SoftButton")
+        api_key_change_btn.setStyleSheet("padding: 6px 14px; min-height: 0; border-radius: 10px;")
+        api_key_change_btn.clicked.connect(self._change_api_key)
+        api_key_row.addWidget(self.api_key_status_label, 1)
+        api_key_row.addWidget(api_key_change_btn)
+        form2 = QFormLayout()
+        form2.setSpacing(14)
+        form2.setLabelAlignment(Qt.AlignRight)
+        form2.addRow("AI API 키", api_key_row)
+        root.addLayout(form2)
+
+        # ── 표본 추가 ────────────────────────────────────────────────────────
+        sample_btn = QPushButton("표본 추가")
+        sample_btn.setObjectName("SoftButton")
+        sample_btn.setStyleSheet("padding: 8px 16px; min-height: 0; border-radius: 10px;")
+        sample_btn.clicked.connect(self._add_sample_data)
+        sample_row = QHBoxLayout()
+        sample_hint = QLabel("Study Stats 등 모든 기능을 점검할 수 있는 표본 데이터를 추가합니다")
+        sample_hint.setObjectName("MutedText")
+        sample_hint.setStyleSheet("font-size: 12px;")
+        sample_row.addWidget(sample_hint, 1)
+        sample_row.addWidget(sample_btn)
+        root.addLayout(sample_row)
 
         # ── 저장 정보 초기화 ──────────────────────────────────────────────────
         reset_data_btn = QPushButton("저장 정보 초기화")
@@ -205,6 +238,33 @@ class SettingsDialog(QDialog):
         self.volume_slider.setValue(vol)
         self.volume_label.setText(f"{vol} %")
         self.dark_mode_check.setChecked(gi("dark_mode") == 1)
+        self._refresh_api_key_status()
+
+    def _refresh_api_key_status(self) -> None:
+        api_key = self.store.get_setting("openai_api_key", "")
+        if api_key:
+            self.api_key_status_label.setText("✓ 등록됨")
+            self.api_key_status_label.setStyleSheet("font-weight: 700; color: #2f9e44;")
+        else:
+            self.api_key_status_label.setText("✗ 등록되지 않음")
+            self.api_key_status_label.setStyleSheet("font-weight: 700; color: #e5484d;")
+
+    def _change_api_key(self) -> None:
+        api_key, ok = QInputDialog.getText(
+            self,
+            "AI API 키 변경",
+            "AI 재조정에 사용할 API 키를 입력하세요.\n\n"
+            "지원 API:\n"
+            "- OpenAI (sk-...)\n"
+            "- Gemini (AIza...)\n"
+            "- Hugging Face (hf_...)\n\n"
+            "키는 이 PC의 앱 설정 DB에 저장됩니다.",
+            QLineEdit.Password,
+        )
+        if not ok:
+            return
+        self.store.set_setting("openai_api_key", api_key.strip())
+        self._refresh_api_key_status()
 
     def _reset(self) -> None:
         d = SETTING_DEFAULTS
@@ -221,6 +281,23 @@ class SettingsDialog(QDialog):
         self.store.set_setting("alarm_volume", str(self.volume_slider.value()))
         self.store.set_setting("dark_mode", "1" if self.dark_mode_check.isChecked() else "0")
         self.accept()
+
+    def _add_sample_data(self) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("표본 추가")
+        box.setText("표본을 추가하시겠습니까?")
+        box.setInformativeText("Study Stats 그래프 등 모든 기능을 점검할 수 있는 표본 데이터가 오늘 날짜에 추가됩니다.")
+        add_button = box.addButton("추가", QMessageBox.AcceptRole)
+        box.addButton("취소", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() != add_button:
+            return
+
+        self.store.add_sample_data(self.day)
+        if self.on_sample_added:
+            self.on_sample_added()
+        QMessageBox.information(self, "표본 추가 완료", "표본 데이터가 추가되었습니다.")
 
     def _reset_data(self) -> None:
         reply = QMessageBox.warning(
