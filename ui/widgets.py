@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtCore import QPoint, QPointF, Qt, QRectF, Signal, QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -372,6 +372,16 @@ class TimeBlockButton(QPushButton):
         self.initStyleOption(option)
         option.text = ""
         self.style().drawControl(QStyle.CE_PushButton, option, painter, self)
+
+        # 이미 지나간 시간이면서 비어 있는 블록만 빗살무늬로 표시한다.
+        # filled/life 등 기존에 강조된 블록(과목 색, 타이머 구간)은 그대로 둔다.
+        if self.property("past") and not self.property("filled"):
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(120, 130, 150, 70), Qt.BDiagPattern))
+            painter.drawRect(self.rect())
+            painter.restore()
 
         if not self.task_text:
             return

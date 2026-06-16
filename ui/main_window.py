@@ -1495,6 +1495,7 @@ class MainWindow(QMainWindow):
         self.refresh_blocks()
 
     def center_current_time_in_plan(self) -> None:
+        self.refresh_past_block_styles()
         if self.day != datetime.now().date().isoformat() or not hasattr(self, "plan_scroll"):
             return
         now = datetime.now()
@@ -1649,6 +1650,7 @@ class MainWindow(QMainWindow):
                 button.setProperty("life", todo.subject_kind == "other")
                 button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
             button.setProperty("selected", key == self.selected_block_key)
+            button.setProperty("past", self.is_block_in_past(key))
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
@@ -1666,8 +1668,18 @@ class MainWindow(QMainWindow):
         button.setProperty("life", todo.subject_kind == "other")
         button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
         button.setProperty("selected", block_key == self.selected_block_key)
+        button.setProperty("past", self.is_block_in_past(block_key))
         button.style().unpolish(button)
         button.style().polish(button)
+
+    def refresh_past_block_styles(self) -> None:
+        """10분 블록 경계를 넘어갈 때 과거 시간 표시(빗살무늬)를 갱신한다."""
+        for key, button in self.block_buttons.items():
+            is_past = self.is_block_in_past(key)
+            if button.property("past") == is_past:
+                continue
+            button.setProperty("past", is_past)
+            button.update()
 
     def refresh_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)
