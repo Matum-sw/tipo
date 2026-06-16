@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtCore import QPoint, QPointF, Qt, QRectF, Signal, QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -372,6 +372,26 @@ class TimeBlockButton(QPushButton):
         self.initStyleOption(option)
         option.text = ""
         self.style().drawControl(QStyle.CE_PushButton, option, painter, self)
+
+        if self.property("excluded"):
+            # 제외 시간으로 지정된 블록: 옅은 빨간색 + 빨간 빗살무늬
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(220, 60, 60, 40))
+            painter.drawRect(self.rect())
+            painter.setBrush(QBrush(QColor(200, 50, 50, 110), Qt.BDiagPattern))
+            painter.drawRect(self.rect())
+            painter.restore()
+        elif self.property("past") and not self.property("timer_ran"):
+            # 이미 지나갔지만 실제 타이머가 작동하지 않은 블록만 회색 빗살무늬로 표시한다.
+            # 타이머가 작동했던 구간(오버레이) 등 기존에 강조된 부분은 덮지 않는다.
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(120, 130, 150, 70), Qt.BDiagPattern))
+            painter.drawRect(self.rect())
+            painter.restore()
 
         if not self.task_text:
             return

@@ -181,9 +181,19 @@ class AIFeedbackService:
         return (
             "You are a realistic Korean study planner. "
             "Use only the provided app data. Do not invent tasks. "
-            "Only use editable_block_keys. Never schedule protected_block_keys. "
+            "Only use editable_block_keys. Never schedule protected_block_keys or excluded_block_keys. "
             "Use todo_id 0 for rest, buffer, or recovery. "
-            "Return concise Korean reasons."
+            "Use recent_performance_summary and recent_days.performance to calibrate today's remaining plan. "
+            "Use schedule_baseline for the target task count, target block count, and typical work-buffer interval. "
+            "Compare recent planned_blocks with timer focus_segment_minutes to infer how many continuous blocks the user actually sustains. "
+            "Use rule_based_proposal as the starting recommendation; only override it when the app data clearly supports a better patch. "
+            "The schedule array is a patch: return only blocks that should change from current_blocks. "
+            "If today's remaining plan is unrealistic, include concrete blocks to clear with todo_id 0 or move to another todo_id. "
+            "Consider every todo in todos, including todos with 0 planned minutes. "
+            "If schedule_alerts is not empty, address those alerts with concrete changed blocks unless there is a clear reason not to. "
+            "For a too_long_continuous_task alert, do not create scattered empty gaps inside the task. Keep each task's start time fixed, compact that task's blocks forward, and clear only the trailing excess blocks when reduction is needed. "
+            "Write realistic_reason in Korean with 3 to 5 detailed sentences, starting with '지난 10일 데이터를 분석한 결과'. "
+            "Mention concrete baseline numbers when available, such as completion rate, focus-vs-plan rate, average focus segment, and work-buffer pattern."
         )
 
     def _schedule_prompt_ko(self, context: dict) -> str:

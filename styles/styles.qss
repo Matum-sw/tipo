@@ -236,6 +236,24 @@ QPushButton:hover {
   background: #d63f44;
 }
 
+#WarningButton {
+  background: #f5c542;
+  color: #4a3a00;
+}
+
+#WarningButton:hover {
+  background: #e6b730;
+}
+
+#WarningButton:checked {
+  background: #b45309;
+  color: #ffffff;
+}
+
+#WarningButton:checked:hover {
+  background: #9a4608;
+}
+
 #TimerValue {
   font-size: 44px;
   font-weight: 900;

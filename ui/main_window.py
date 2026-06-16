@@ -91,7 +91,9 @@ class MainWindow(QMainWindow):
         self.drag_last_block_key = None
         self.drag_start_block_key = None
         self.drag_existing_blocks = {}
+        self.drag_excluded_blocks = set()
         self.delete_mode = False
+        self.exclude_mode = False
         self.running = None
         self.pomodoro_history = []
         self._db_segments_cache: list[dict] = []
@@ -277,6 +279,11 @@ class MainWindow(QMainWindow):
         plan_actions = QHBoxLayout()
         self.selected_block_label = QLabel("선택된 블록 없음")
         self.selected_block_label.setObjectName("MutedText")
+        self.exclude_mode_button = QPushButton("제외 시간")
+        self.exclude_mode_button.setObjectName("WarningButton")
+        self.exclude_mode_button.setCheckable(True)
+        self.exclude_mode_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 8px;")
+        self.exclude_mode_button.clicked.connect(self.toggle_exclude_mode)
         self.delete_mode_button = QPushButton("추가 모드")
         self.delete_mode_button.setObjectName("SoftButton")
         self.delete_mode_button.setCheckable(True)
@@ -287,6 +294,7 @@ class MainWindow(QMainWindow):
         clear_all_button.setStyleSheet("padding: 4px 10px; min-height: 0; font-size: 13px; border-radius: 8px;")
         clear_all_button.clicked.connect(self.clear_all_blocks)
         plan_actions.addWidget(self.selected_block_label, 1)
+        plan_actions.addWidget(self.exclude_mode_button)
         plan_actions.addWidget(self.delete_mode_button)
         plan_actions.addWidget(clear_all_button)
         card.layout.addLayout(plan_actions)
@@ -458,6 +466,12 @@ class MainWindow(QMainWindow):
     # ── Todo ──────────────────────────────────────────────────────────────────
 
     def open_add_todo_dialog(self) -> None:
+        if self.delete_mode:
+            QMessageBox.information(self, "삭제 모드", "현재 삭제 모드입니다. 추가 모드로 변경해 주세요.")
+            return
+        if self.exclude_mode:
+            QMessageBox.information(self, "제외 시간 모드", "현재 제외 시간 모드입니다. 제외 시간 버튼을 해제해 주세요.")
+            return
         self.log_event("todo_add_opened", subject_id=self.selected_subject_id)
         dialog = TodoAddDialog(self.store, self.day, self.selected_subject_id, self.subject_color_map, self)
         dialog.exec()
@@ -465,6 +479,12 @@ class MainWindow(QMainWindow):
         self.refresh_todos()
 
     def select_todo(self, item: QListWidgetItem) -> None:
+        if self.delete_mode:
+            QMessageBox.information(self, "삭제 모드", "현재 삭제 모드입니다. 추가 모드로 변경해 주세요.")
+            return
+        if self.exclude_mode:
+            QMessageBox.information(self, "제외 시간 모드", "현재 제외 시간 모드입니다. 제외 시간 버튼을 해제해 주세요.")
+            return
         self.selected_todo_id = item.data(Qt.UserRole)
         todo = self.todo_lookup.get(self.selected_todo_id)
         self.log_event(
@@ -543,16 +563,28 @@ class MainWindow(QMainWindow):
             self.erase_block(block_key)
             return
 
+        if self.exclude_mode:
+            self.drag_is_painting = True
+            self.drag_visited_blocks = set()
+            self.drag_last_block_key = None
+            self.drag_existing_blocks = dict(self.store.blocks_for_day(self.day))
+            self.paint_excluded_to_block(block_key)
+            return
+
         self.set_selected_block(block_key)
         blocks = dict(self.store.blocks_for_day(self.day))
         if self.selected_todo_id:
             if self.is_block_in_past(block_key):
                 QMessageBox.information(self, "배치 불가", "이미 지나간 시간에는 일정을 추가할 수 없습니다.")
                 return
+            if block_key in self.store.excluded_blocks_for_day(self.day):
+                QMessageBox.information(self, "배치 불가", "제외 시간으로 지정된 블록에는 일정을 추가할 수 없습니다.")
+                return
             self.drag_todo_id = self.selected_todo_id
             self.drag_start_block_key = block_key
             self.drag_visited_blocks = set()
             self.drag_existing_blocks = blocks
+            self.drag_excluded_blocks = self.store.excluded_blocks_for_day(self.day)
             self.drag_is_painting = True
             self.paint_todo_to_block(block_key)
             return
@@ -569,6 +601,8 @@ class MainWindow(QMainWindow):
             return
         if self.delete_mode:
             self.erase_block(block_key)
+        elif self.exclude_mode:
+            self.paint_excluded_to_block(block_key)
         elif self.drag_todo_id:
             self.paint_todo_to_block(block_key)
 
@@ -581,6 +615,8 @@ class MainWindow(QMainWindow):
         if isinstance(widget, TimeBlockButton):
             if self.delete_mode:
                 self.erase_block(widget.block_key)
+            elif self.exclude_mode:
+                self.paint_excluded_to_block(widget.block_key)
             elif self.drag_todo_id:
                 self.paint_todo_to_block(widget.block_key)
 
@@ -592,17 +628,23 @@ class MainWindow(QMainWindow):
         todo_id = self.drag_todo_id
         last_block_key = self.drag_last_block_key or block_key
         was_delete_mode = self.delete_mode
+        was_exclude_mode = self.exclude_mode
         self.drag_todo_id = None
         self.drag_is_painting = False
         self.drag_last_block_key = None
         self.drag_start_block_key = None
         self.drag_existing_blocks = {}
+        self.drag_excluded_blocks = set()
         self.drag_visited_blocks = set()
 
         if was_delete_mode:
             self.log_event("block_erased", block_key=last_block_key, metadata={"block_count": visited_count})
             self.refresh_todos()
             self.refresh_stats()
+            return
+
+        if was_exclude_mode:
+            self.log_event("block_excluded", block_key=last_block_key, metadata={"block_count": visited_count})
             return
 
         self.refresh_blocks()
@@ -640,6 +682,8 @@ class MainWindow(QMainWindow):
                 continue
             if self.is_block_in_past(key):
                 continue
+            if key in self.drag_excluded_blocks:
+                continue
             existing = self.drag_existing_blocks.get(key)
             if existing and existing != self.drag_todo_id:
                 continue
@@ -650,10 +694,44 @@ class MainWindow(QMainWindow):
 
         self.set_selected_block(block_key)
 
+    def paint_excluded_to_block(self, block_key: str) -> None:
+        if self.drag_last_block_key and self.drag_last_block_key != block_key:
+            last_idx = BLOCK_KEY_INDEX.get(self.drag_last_block_key, 0)
+            curr_idx = BLOCK_KEY_INDEX.get(block_key, 0)
+            lo, hi = min(last_idx, curr_idx), max(last_idx, curr_idx)
+            keys_to_paint = ALL_BLOCK_KEYS[lo : hi + 1]
+        else:
+            keys_to_paint = [block_key]
+
+        for key in keys_to_paint:
+            if key in self.drag_visited_blocks:
+                continue
+            self.drag_visited_blocks.add(key)
+            self.drag_last_block_key = key
+            # 일정이 등록된 곳에는 제외 시간을 지정할 수 없다.
+            if self.drag_existing_blocks.get(key):
+                continue
+            self.store.set_block_excluded(self.day, key, True)
+            button = self.block_buttons.get(key)
+            if button:
+                button.setProperty("excluded", True)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
+
     def erase_block(self, block_key: str) -> None:
         if block_key in self.drag_visited_blocks:
             return
         self.drag_visited_blocks.add(block_key)
+        if self.store.is_block_excluded(self.day, block_key):
+            self.store.set_block_excluded(self.day, block_key, False)
+            button = self.block_buttons.get(block_key)
+            if button:
+                button.setProperty("excluded", False)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
+            return
         if self.store.block_has_timer_records(self.day, block_key):
             return
         self.store.delete_block(self.day, block_key)
@@ -675,10 +753,24 @@ class MainWindow(QMainWindow):
         if self.delete_mode:
             self.delete_mode_button.setText("삭제 모드")
             self.delete_mode_button.setObjectName("DangerButton")
+            # 삭제 모드가 활성화되면 선택돼 있던 할 일은 선택 해제한다.
+            self.selected_todo_id = None
+            self.refresh_todos()
+            if self.exclude_mode:
+                self.exclude_mode_button.setChecked(False)
+                self.toggle_exclude_mode()
         else:
             self.delete_mode_button.setText("추가 모드")
             self.delete_mode_button.setObjectName("SoftButton")
         self.repolish(self.delete_mode_button)
+
+    def toggle_exclude_mode(self) -> None:
+        self.exclude_mode = self.exclude_mode_button.isChecked()
+        self.log_event("exclude_mode_toggled", metadata={"enabled": self.exclude_mode})
+        if self.exclude_mode and self.delete_mode:
+            self.delete_mode_button.setChecked(False)
+            self.toggle_delete_mode()
+        self.repolish(self.exclude_mode_button)
 
     def clear_all_blocks(self) -> None:
         reply = QMessageBox.question(
@@ -1257,6 +1349,46 @@ class MainWindow(QMainWindow):
         ranges.append(f"{start}~{self.block_end_label(previous)}")
         return ", ".join(ranges)
 
+    def todo_planned_ranges(self, todo_id: int, blocks: dict[str, int]) -> list[dict]:
+        keys = [key for key in ALL_BLOCK_KEYS if blocks.get(key) == todo_id]
+        if not keys:
+            return []
+
+        ranges = []
+        start = keys[0]
+        previous = keys[0]
+        range_keys = [keys[0]]
+        previous_idx = BLOCK_KEY_INDEX[previous]
+
+        for key in keys[1:]:
+            idx = BLOCK_KEY_INDEX[key]
+            if idx == previous_idx + 1:
+                previous = key
+                range_keys.append(key)
+                previous_idx = idx
+                continue
+            ranges.append(
+                {
+                    "start": start,
+                    "end": self.block_end_label(previous),
+                    "minutes": len(range_keys) * 10,
+                    "block_keys": list(range_keys),
+                }
+            )
+            start = previous = key
+            range_keys = [key]
+            previous_idx = idx
+
+        ranges.append(
+            {
+                "start": start,
+                "end": self.block_end_label(previous),
+                "minutes": len(range_keys) * 10,
+                "block_keys": list(range_keys),
+            }
+        )
+        return ranges
+
     def current_prompt_context(self) -> dict:
         now = datetime.now()
         current_block_key = f"{now.hour:02d}:{(now.minute // 10) * 10:02d}"
@@ -1361,11 +1493,12 @@ class MainWindow(QMainWindow):
         todos = self.store.todos_for_day(self.day)
         blocks = self.store.blocks_for_day(self.day)
         records = self.store.timer_records_for_day(self.day)
+        excluded_block_keys = self.store.excluded_blocks_for_day(self.day)
         protected_block_keys = [
             key
             for key in ALL_BLOCK_KEYS
             if self.block_start_minutes(key) >= editable_start_minutes
-            and self.store.block_has_timer_records(self.day, key)
+            and (self.store.block_has_timer_records(self.day, key) or key in excluded_block_keys)
         ]
         editable_block_keys = [
             key
@@ -1374,7 +1507,7 @@ class MainWindow(QMainWindow):
             and key not in protected_block_keys
         ]
 
-        days = self.store.activity_days(limit=14)
+        days = self.store.activity_days(limit=11)
         if self.day not in days:
             days.insert(0, self.day)
         events = self.store.event_logs_for_days(days)
@@ -1385,16 +1518,103 @@ class MainWindow(QMainWindow):
         recent_days = []
         for day in days:
             day_records = self.store.timer_records_for_day(day)
+            day_timer = self.summarize_timer_records(day_records)
             day_events = events_by_day.get(day, [])
+            day_todos = self.store.todos_for_day(day)
+            day_todos_by_id = {todo.id: todo for todo in day_todos}
+            day_blocks = self.store.blocks_for_day(day)
+            day_todo_status = self.summarize_todo_status(day_todos)
+            planned_minutes = len(day_blocks) * 10
+            focus_minutes = int(day_timer.get("minutes_by_type", {}).get("focus", 0))
+            total_todos = len(day_todos)
+            done_todos = int(day_todo_status.get("done", 0))
             recent_days.append(
                 {
                     "day": day,
-                    "timer": self.summarize_timer_records(day_records),
+                    "timer": day_timer,
                     "events": self.summarize_events(day_events),
-                    "todo_status": self.summarize_todo_status(self.store.todos_for_day(day)),
-                    "planned_minutes": len(self.store.blocks_for_day(day)) * 10,
+                    "todo_status": day_todo_status,
+                    "planned_minutes": planned_minutes,
+                    "planned_blocks": [
+                        {
+                            "block_key": key,
+                            "todo_id": todo_id,
+                            "subject": day_todos_by_id[todo_id].subject_name
+                            if todo_id in day_todos_by_id
+                            else "",
+                            "title": day_todos_by_id[todo_id].title if todo_id in day_todos_by_id else "",
+                            "status": day_todos_by_id[todo_id].status if todo_id in day_todos_by_id else "",
+                        }
+                        for key, todo_id in sorted(day_blocks.items())
+                    ],
+                    "performance": {
+                        "todo_completion_rate_percent": round(done_todos / total_todos * 100) if total_todos else 0,
+                        "focus_vs_plan_rate_percent": round(focus_minutes / planned_minutes * 100)
+                        if planned_minutes
+                        else 0,
+                        "done_todos": done_todos,
+                        "total_todos": total_todos,
+                        "focus_minutes": focus_minutes,
+                    },
                 }
             )
+
+        history_days = [day for day in recent_days if day["day"] != self.day][:10]
+        history_planned_minutes = sum(day["planned_minutes"] for day in history_days)
+        history_focus_minutes = sum(day["performance"]["focus_minutes"] for day in history_days)
+        history_total_todos = sum(day["performance"]["total_todos"] for day in history_days)
+        history_done_todos = sum(day["performance"]["done_todos"] for day in history_days)
+        history_range_minutes = []
+        history_focus_segment_minutes = []
+        for day in history_days:
+            day_blocks = {block["block_key"]: block["todo_id"] for block in day["planned_blocks"]}
+            for todo_id in {block["todo_id"] for block in day["planned_blocks"]}:
+                history_range_minutes.extend(
+                    planned_range["minutes"] for planned_range in self.todo_planned_ranges(todo_id, day_blocks)
+                )
+            history_focus_segment_minutes.extend(
+                record_minutes
+                for record_minutes in day.get("timer", {}).get("focus_segment_minutes", [])
+                if record_minutes > 0
+            )
+
+        average_task_count = round(
+            sum(day["performance"]["total_todos"] for day in history_days) / len(history_days)
+        ) if history_days else 0
+        average_planned_blocks = round(history_planned_minutes / 10 / len(history_days)) if history_days else 0
+        average_focus_blocks = round(history_focus_minutes / 10 / len(history_days)) if history_days else 0
+        average_range_minutes = round(sum(history_range_minutes) / len(history_range_minutes)) if history_range_minutes else 50
+        average_focus_segment_minutes = (
+            round(sum(history_focus_segment_minutes) / len(history_focus_segment_minutes))
+            if history_focus_segment_minutes
+            else average_range_minutes
+        )
+        typical_work_blocks = max(
+            2,
+            min(6, round(min(average_range_minutes, average_focus_segment_minutes) / 10)),
+        )
+        completion_rate = round(history_done_todos / history_total_todos * 100) if history_total_todos else 0
+        focus_vs_plan_rate = round(history_focus_minutes / history_planned_minutes * 100) if history_planned_minutes else 0
+        target_planned_blocks = round(average_planned_blocks * max(0.5, focus_vs_plan_rate / 100)) if average_planned_blocks else 0
+        editable_blocks = {key: blocks[key] for key in editable_block_keys if blocks.get(key)}
+        schedule_alerts = []
+        for todo in todos:
+            for planned_range in self.todo_planned_ranges(todo.id, editable_blocks):
+                if len(planned_range["block_keys"]) > typical_work_blocks:
+                    schedule_alerts.append(
+                        {
+                            "type": "too_long_continuous_task",
+                            "todo_id": todo.id,
+                            "subject": todo.subject_name,
+                            "title": todo.title,
+                            "start": planned_range["start"],
+                            "end": planned_range["end"],
+                            "minutes": planned_range["minutes"],
+                            "reason": "continuous planned task is longer than recent work pattern",
+                            "typical_work_blocks": typical_work_blocks,
+                            "block_keys": planned_range["block_keys"],
+                        }
+                    )
 
         return {
             "day": self.day,
@@ -1402,9 +1622,12 @@ class MainWindow(QMainWindow):
             "current_block_key": current_block_key,
             "editable_block_keys": editable_block_keys,
             "protected_block_keys": protected_block_keys,
+            "excluded_block_keys": sorted(excluded_block_keys),
+            "schedule_alerts": schedule_alerts,
             "rules": [
                 "현재 시간 이전 블록은 수정하지 않는다.",
                 "protected_block_keys는 수정하지 않는다.",
+                "excluded_block_keys는 사용자가 제외한 시간이므로 절대 배정하지 않는다.",
                 "todo_id 0은 휴식, 완충, 비워두기를 의미한다.",
                 "최근 실제 집중 패턴상 불가능하면 일부 작업만 배치한다.",
                 "같은 어려운 작업을 무리하게 길게 이어 붙이지 않는다.",
@@ -1418,6 +1641,14 @@ class MainWindow(QMainWindow):
                     "planned_after_now_minutes": sum(
                         10 for key in editable_block_keys if blocks.get(key) == todo.id
                     ),
+                    "planned_block_keys_after_now": [
+                        key for key in editable_block_keys if blocks.get(key) == todo.id
+                    ],
+                    "planned_ranges_after_now": self.summarize_todo_ranges(
+                        todo.id,
+                        {key: blocks[key] for key in editable_block_keys if blocks.get(key)},
+                    ),
+                    "planned_ranges_after_now_detail": self.todo_planned_ranges(todo.id, editable_blocks),
                 }
                 for todo in todos
             ],
@@ -1427,13 +1658,34 @@ class MainWindow(QMainWindow):
                     "todo_id": blocks.get(key, 0),
                     "editable": key in editable_block_keys,
                     "protected": key in protected_block_keys,
+                    "excluded": key in excluded_block_keys,
                 }
                 for key in ALL_BLOCK_KEYS
-                if blocks.get(key) or key in editable_block_keys or key in protected_block_keys
+                if blocks.get(key) or key in editable_block_keys or key in protected_block_keys or key in excluded_block_keys
             ],
             "today_timer": self.summarize_timer_records(records),
             "today_events": self.summarize_events(events_by_day.get(self.day, [])),
-            "brain_dump": self.store.brain_dump(self.day),
+            "recent_performance_summary": {
+                "days": [day["day"] for day in history_days],
+                "todo_completion_rate_percent": completion_rate,
+                "focus_vs_plan_rate_percent": focus_vs_plan_rate,
+                "planned_minutes": history_planned_minutes,
+                "focus_minutes": history_focus_minutes,
+                "done_todos": history_done_todos,
+                "total_todos": history_total_todos,
+            },
+            "schedule_baseline": {
+                "source": "recent 10 activity days excluding today",
+                "average_task_count": average_task_count,
+                "average_planned_blocks": average_planned_blocks,
+                "average_focus_blocks": average_focus_blocks,
+                "target_planned_blocks_after_completion_adjustment": target_planned_blocks,
+                "average_continuous_work_minutes": average_range_minutes,
+                "average_actual_focus_segment_minutes": average_focus_segment_minutes,
+                "typical_continuous_work_blocks": typical_work_blocks,
+                "buffer_blocks_between_work_chunks": 1,
+                "suggested_pattern": f"{typical_work_blocks * 10} minutes work + 10 minutes buffer",
+            },
             "recent_days": recent_days,
         }
 
@@ -1441,6 +1693,7 @@ class MainWindow(QMainWindow):
         by_type = defaultdict(int)
         by_todo = defaultdict(int)
         by_subject = defaultdict(int)
+        focus_segment_minutes = []
         for record in records:
             seconds = int(record.get("seconds") or 0)
             event_type = record.get("event_type") or "unknown"
@@ -1448,10 +1701,12 @@ class MainWindow(QMainWindow):
             if event_type == "focus":
                 by_todo[str(record.get("todo_id"))] += seconds
                 by_subject[record.get("subject_name") or "unknown"] += seconds
+                focus_segment_minutes.append(max(1, round(seconds / 60)))
         return {
             "minutes_by_type": {key: round(value / 60) for key, value in by_type.items()},
             "focus_minutes_by_todo_id": {key: round(value / 60) for key, value in by_todo.items()},
             "focus_minutes_by_subject": {key: round(value / 60) for key, value in by_subject.items()},
+            "focus_segment_minutes": focus_segment_minutes,
         }
 
     def summarize_events(self, events: list[dict]) -> dict:
@@ -1495,6 +1750,7 @@ class MainWindow(QMainWindow):
         self.refresh_blocks()
 
     def center_current_time_in_plan(self) -> None:
+        self.refresh_past_block_styles()
         if self.day != datetime.now().date().isoformat() or not hasattr(self, "plan_scroll"):
             return
         now = datetime.now()
@@ -1632,6 +1888,7 @@ class MainWindow(QMainWindow):
 
     def refresh_blocks(self) -> None:
         blocks = self.store.blocks_for_day(self.day)
+        excluded = self.store.excluded_blocks_for_day(self.day)
         for key, button in self.block_buttons.items():
             todo = self.todo_lookup.get(blocks.get(key))
             if not todo:
@@ -1649,6 +1906,9 @@ class MainWindow(QMainWindow):
                 button.setProperty("life", todo.subject_kind == "other")
                 button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
             button.setProperty("selected", key == self.selected_block_key)
+            button.setProperty("past", self.is_block_in_past(key))
+            button.setProperty("timer_ran", self.store.block_has_timer_records(self.day, key))
+            button.setProperty("excluded", key in excluded)
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
@@ -1666,8 +1926,21 @@ class MainWindow(QMainWindow):
         button.setProperty("life", todo.subject_kind == "other")
         button.setProperty("color_idx", str(cidx) if cidx >= 0 else "")
         button.setProperty("selected", block_key == self.selected_block_key)
+        button.setProperty("past", self.is_block_in_past(block_key))
+        button.setProperty("timer_ran", self.store.block_has_timer_records(self.day, block_key))
+        button.setProperty("excluded", self.store.is_block_excluded(self.day, block_key))
         button.style().unpolish(button)
         button.style().polish(button)
+
+    def refresh_past_block_styles(self) -> None:
+        """10분 블록 경계를 넘어갈 때 과거 시간 표시(빗살무늬)를 갱신한다."""
+        for key, button in self.block_buttons.items():
+            is_past = self.is_block_in_past(key)
+            if button.property("past") == is_past:
+                continue
+            button.setProperty("past", is_past)
+            button.setProperty("timer_ran", self.store.block_has_timer_records(self.day, key))
+            button.update()
 
     def refresh_stats(self) -> None:
         records = self.store.timer_records_for_day(self.day)
@@ -1782,6 +2055,15 @@ class MainWindow(QMainWindow):
             )
             return
 
+        context["rule_based_proposal"] = self.local_realistic_schedule(
+            {
+                "summary": "최근 기록 기준으로 만든 규칙 기반 시간표 후보입니다.",
+                "realistic_reason": self.schedule_baseline_reason(context),
+                "schedule": [],
+            },
+            context,
+        )
+
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             proposal = self.ai.generate_realistic_schedule(context)
@@ -1795,17 +2077,257 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+        proposal = self.local_realistic_schedule(proposal, context)
+
+        if not proposal.get("schedule"):
+            self.log_event("realistic_schedule_empty", metadata={"summary": proposal.get("summary", "")})
+            QMessageBox.information(
+                self,
+                "시간표 현실화",
+                "AI가 적용할 변경 블록을 제안하지 않았습니다.\n\n"
+                f"{proposal.get('realistic_reason', proposal.get('summary', '변경 제안이 비어 있습니다.'))}",
+            )
+            return
+
         if self.confirm_realistic_schedule(proposal):
             changed = self.apply_realistic_schedule(proposal, context)
             self.log_event("realistic_schedule_applied", metadata={"changed_blocks": changed})
             self.refresh_blocks()
             self.refresh_todos()
             self.refresh_stats()
+            if changed == 0:
+                QMessageBox.information(
+                    self,
+                    "시간표 현실화",
+                    "AI 제안은 있었지만 실제로 바뀐 블록은 없습니다.\n\n"
+                    "제안된 블록이 이미 같은 작업으로 배정되어 있거나, 현재 수정 가능한 시간 범위를 벗어났을 수 있습니다.",
+                )
+                return
             QMessageBox.information(
                 self,
                 "적용 완료",
                 f"현재 시간 이후 시간표를 현실적으로 재조정했습니다.\n변경된 블록: {changed}개",
             )
+
+    def schedule_baseline_reason(self, context: dict) -> str:
+        baseline = context.get("schedule_baseline", {})
+        performance = context.get("recent_performance_summary", {})
+        days = performance.get("days", [])
+        day_text = ", ".join(days) if days else "최근 기록"
+        return (
+            f"지난 10일 데이터를 분석한 결과({day_text}), 평균 task 수는 "
+            f"{baseline.get('average_task_count', 0)}개, 평균 계획 블록 수는 "
+            f"{baseline.get('average_planned_blocks', 0)}개였습니다. 실제 타이머 기준 평균 집중 블록은 "
+            f"{baseline.get('average_focus_blocks', 0)}개이고, task 달성률은 "
+            f"{performance.get('todo_completion_rate_percent', 0)}%, 계획 대비 실제 집중률은 "
+            f"{performance.get('focus_vs_plan_rate_percent', 0)}%로 계산되었습니다. "
+            f"또한 최근 실제 집중 세그먼트 평균은 약 "
+            f"{baseline.get('average_actual_focus_segment_minutes', 0)}분이므로, 오늘 시간표에서는 "
+            f"{baseline.get('suggested_pattern', '짧은 작업 + 버퍼')} 패턴을 기준으로 연속 배치를 줄였습니다. "
+            "사용자가 제외 시간으로 지정한 블록은 배정 후보에서 제외했고, task별 시작 시간은 최대한 유지했습니다. "
+            "뽀모도로 내부 휴식이 이미 있으므로 중간중간 빈칸을 흩뿌리기보다는 같은 task 블록을 앞쪽으로 붙여 배치하고, "
+            "필요할 때만 뒤쪽 초과 블록을 비우는 방식으로 실제 수행 가능성에 맞게 조정했습니다."
+        )
+
+    def local_realistic_schedule(self, proposal: dict, context: dict) -> dict:
+        schedule = list(proposal.get("schedule") or [])
+        scheduled_block_keys = {
+            item.get("block_key") for item in schedule if isinstance(item, dict)
+        }
+        added_local_schedule = False
+        editable = set(context.get("editable_block_keys", []))
+        protected = set(context.get("protected_block_keys", []))
+        excluded = set(context.get("excluded_block_keys", []))
+        baseline = context.get("schedule_baseline", {})
+        work_blocks = int(baseline.get("typical_continuous_work_blocks") or 5)
+        cycle_blocks = max(4, min(10, work_blocks + 1))
+        max_changes = 96
+
+        for alert in context.get("schedule_alerts", []):
+            if alert.get("type") != "too_long_continuous_task":
+                continue
+
+            alert_block_keys = [
+                key
+                for key in alert.get("block_keys", [])
+                if key in editable and key not in protected and key not in excluded
+            ]
+            clear_count = len(alert_block_keys) // cycle_blocks
+            block_keys = alert_block_keys[-clear_count:] if clear_count else []
+            for block_key in block_keys:
+                if block_key in scheduled_block_keys:
+                    continue
+                schedule.append(
+                    {
+                        "block_key": block_key,
+                        "todo_id": 0,
+                        "label": "휴식/버퍼",
+                        "reason": (
+                            f"{alert.get('subject', '작업')}이 최근 집중 패턴보다 길게 연속 배치되어 "
+                            "시작 시간은 유지하고 뒤쪽 초과 블록만 비워 작업을 붙여 배치합니다."
+                        ),
+                    }
+                )
+                scheduled_block_keys.add(block_key)
+                added_local_schedule = True
+                if len(schedule) >= max_changes:
+                    break
+
+            if len(schedule) >= max_changes:
+                break
+
+        current_blocks = {
+            item.get("block_key"): int(item.get("todo_id") or 0)
+            for item in context.get("current_blocks", [])
+            if item.get("block_key")
+        }
+        scheduled_block_keys = {
+            item.get("block_key") for item in schedule if isinstance(item, dict)
+        }
+        todo_current_keys = {}
+        for todo in context.get("todos", []):
+            try:
+                todo_id = int(todo.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if todo_id <= 0:
+                continue
+
+            current_keys = [
+                key
+                for key in ALL_BLOCK_KEYS
+                if current_blocks.get(key) == todo_id and key in editable
+            ]
+            todo_current_keys[todo_id] = current_keys
+            if len(current_keys) < 2:
+                continue
+
+            clear_count = sum(
+                1
+                for item in schedule
+                if isinstance(item, dict)
+                and item.get("block_key") in current_keys
+                and int(item.get("todo_id") or 0) <= 0
+            )
+            desired_count = max(0, len(current_keys) - clear_count)
+            first_idx = BLOCK_KEY_INDEX[current_keys[0]]
+            last_idx = BLOCK_KEY_INDEX[current_keys[-1]]
+            compactable_keys = [
+                key
+                for key in ALL_BLOCK_KEYS[first_idx : last_idx + 1]
+                if key in editable
+                and key not in protected
+                and key not in excluded
+                and current_blocks.get(key, 0) in (0, todo_id)
+            ]
+            desired_keys = set(compactable_keys[:desired_count])
+            if desired_keys == set(current_keys):
+                continue
+
+            subject = todo.get("subject") or "작업"
+            for key in compactable_keys[:desired_count]:
+                if current_blocks.get(key) == todo_id or key in scheduled_block_keys:
+                    continue
+                schedule.append(
+                    {
+                        "block_key": key,
+                        "todo_id": todo_id,
+                        "label": subject,
+                        "reason": "기존 시작 시간은 유지하고 띄엄띄엄 비어 있던 같은 작업 블록을 앞쪽으로 붙여 배치합니다.",
+                    }
+                )
+                scheduled_block_keys.add(key)
+                added_local_schedule = True
+                if len(schedule) >= max_changes:
+                    break
+
+            if len(schedule) >= max_changes:
+                break
+
+            for key in current_keys:
+                if key in desired_keys or key in scheduled_block_keys:
+                    continue
+                schedule.append(
+                    {
+                        "block_key": key,
+                        "todo_id": 0,
+                        "label": "비워두기",
+                        "reason": "같은 작업을 앞쪽으로 붙여 배치하면서 뒤쪽에 남는 초과 블록을 비웁니다.",
+                    }
+                )
+                scheduled_block_keys.add(key)
+                added_local_schedule = True
+                if len(schedule) >= max_changes:
+                    break
+
+            if len(schedule) >= max_changes:
+                break
+
+        current_total_blocks = sum(len(keys) for keys in todo_current_keys.values())
+        target_total_blocks = int(
+            baseline.get("target_planned_blocks_after_completion_adjustment")
+            or baseline.get("average_focus_blocks")
+            or 0
+        )
+        if target_total_blocks and current_total_blocks > target_total_blocks:
+            planned_todo_ids = [todo_id for todo_id, keys in todo_current_keys.items() if keys]
+            min_keep = 1 if target_total_blocks >= len(planned_todo_ids) else 0
+            quotas = {}
+            remaining_target = target_total_blocks
+            remaining_current = current_total_blocks
+            for todo_id in planned_todo_ids:
+                current_count = len(todo_current_keys[todo_id])
+                if remaining_current <= 0:
+                    quota = 0
+                else:
+                    quota = round(current_count * remaining_target / remaining_current)
+                quota = max(min_keep, min(current_count, quota))
+                quotas[todo_id] = quota
+                remaining_target -= quota
+                remaining_current -= current_count
+
+            while sum(quotas.values()) > target_total_blocks:
+                largest = max(quotas, key=lambda todo_id: quotas[todo_id])
+                if quotas[largest] <= min_keep:
+                    break
+                quotas[largest] -= 1
+            while sum(quotas.values()) < target_total_blocks and planned_todo_ids:
+                largest = max(planned_todo_ids, key=lambda todo_id: len(todo_current_keys[todo_id]) - quotas[todo_id])
+                if quotas[largest] >= len(todo_current_keys[largest]):
+                    break
+                quotas[largest] += 1
+
+            for todo_id, current_keys in todo_current_keys.items():
+                quota = quotas.get(todo_id, len(current_keys))
+                for key in current_keys[quota:]:
+                    if key in scheduled_block_keys or key in protected or key in excluded:
+                        continue
+                    schedule.append(
+                        {
+                            "block_key": key,
+                            "todo_id": 0,
+                            "label": "비워두기",
+                            "reason": (
+                                "최근 10일 기준 실제 수행 가능한 총 블록 수를 초과해 "
+                                "task 시작부는 유지하고 뒤쪽 초과 블록을 비웁니다."
+                            ),
+                        }
+                    )
+                    scheduled_block_keys.add(key)
+                    added_local_schedule = True
+                    if len(schedule) >= max_changes:
+                        break
+                if len(schedule) >= max_changes:
+                    break
+
+        if not added_local_schedule:
+            return proposal
+
+        return {
+            "summary": proposal.get("summary") or "최근 기록 기준으로 과밀한 연속 배치를 앞쪽으로 붙여 정리했습니다.",
+            "realistic_reason": proposal.get("realistic_reason") or self.schedule_baseline_reason(context),
+            "schedule": schedule,
+        }
 
     def confirm_realistic_schedule(self, proposal: dict) -> bool:
         schedule = proposal.get("schedule", [])
@@ -1823,22 +2345,41 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Information)
         box.setWindowTitle("시간표 현실화")
         box.setText(proposal.get("summary", "현실적으로 지킬 수 있는 시간표를 제안했습니다."))
-        box.setInformativeText(proposal.get("realistic_reason", "최근 사용 패턴과 남은 시간을 기준으로 조정했습니다."))
-        box.setDetailedText("\n".join(preview_lines) if preview_lines else "제안된 변경 사항이 없습니다.")
+        realistic_reason = proposal.get(
+            "realistic_reason",
+            "지난 10일 데이터를 분석한 결과, 최근 사용 패턴과 남은 시간을 기준으로 조정했습니다.",
+        )
+        box.setInformativeText("최근 사용 패턴과 남은 시간을 기준으로 조정했습니다.")
+        detail_sections = [
+            "배치 근거",
+            realistic_reason,
+            "",
+            "변경 블록",
+            "\n".join(preview_lines) if preview_lines else "제안된 변경 사항이 없습니다.",
+        ]
+        box.setDetailedText("\n".join(detail_sections))
         apply_button = box.addButton("적용", QMessageBox.AcceptRole)
         box.addButton("취소", QMessageBox.RejectRole)
+        box.setMinimumSize(760, 560)
+        QTimer.singleShot(0, lambda: box.resize(820, 620))
+        QTimer.singleShot(
+            0,
+            lambda: [
+                widget.setMinimumSize(720, 360)
+                for widget in box.findChildren(QTextEdit)
+                if widget.isReadOnly()
+            ],
+        )
         box.exec()
         return box.clickedButton() == apply_button
 
     def apply_realistic_schedule(self, proposal: dict, context: dict) -> int:
         editable = set(context.get("editable_block_keys", []))
         protected = set(context.get("protected_block_keys", []))
+        excluded = set(context.get("excluded_block_keys", []))
         valid_todo_ids = {todo.id for todo in self.store.todos_for_day(self.day)}
+        current_blocks = self.store.blocks_for_day(self.day)
         changed = 0
-
-        for key in editable:
-            if key not in protected:
-                self.store.delete_block(self.day, key)
 
         for item in proposal.get("schedule", []):
             block_key = item.get("block_key")
@@ -1846,14 +2387,21 @@ class MainWindow(QMainWindow):
                 todo_id = int(item.get("todo_id") or 0)
             except (TypeError, ValueError):
                 continue
-            if block_key not in editable or block_key in protected:
+            if block_key not in editable or block_key in protected or block_key in excluded:
                 continue
             if todo_id <= 0:
-                changed += 1
+                previous_todo_id = current_blocks.get(block_key)
+                if previous_todo_id:
+                    self.store.delete_block(self.day, block_key)
+                    current_blocks.pop(block_key, None)
+                    changed += 1
                 continue
             if todo_id not in valid_todo_ids:
                 continue
+            if current_blocks.get(block_key) == todo_id:
+                continue
             self.store.assign_block(self.day, block_key, todo_id)
+            current_blocks[block_key] = todo_id
             changed += 1
 
         return changed
