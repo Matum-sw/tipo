@@ -125,10 +125,10 @@ class SQLiteStore:
         ).fetchone()
         return row["count"] > 0
 
-    def add_subject(self, name: str) -> None:
+    def add_subject(self, name: str, difficulty: str = "") -> None:
         self.connection.execute(
-            "INSERT INTO subjects(name, difficulty, kind, created_at) VALUES (?, '', 'subject', ?)",
-            (name, self.now()),
+            "INSERT INTO subjects(name, difficulty, kind, created_at) VALUES (?, ?, 'subject', ?)",
+            (name, difficulty, self.now()),
         )
         self.connection.commit()
 
