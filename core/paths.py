@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 
-APP_NAME = "Daily Time Box Planner"
+APP_NAME = "tipo"
 
 if getattr(sys, "frozen", False):
     ROOT_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
