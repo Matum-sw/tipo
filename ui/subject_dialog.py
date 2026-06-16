@@ -1,3 +1,5 @@
+import sqlite3
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -6,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
@@ -68,11 +71,17 @@ class SubjectDialog(QDialog):
         for subject in self.store.subjects(include_other=False):
             self.list_widget.addItem(f"{subject.name}  ·  {subject.difficulty}")
 
-    def add_subject(self) -> None:
+    def add_subject(self, _checked: bool = False) -> None:
         name = self.name_input.text().strip()
         if not name:
             return
-        self.store.add_subject(name, self.difficulty.currentText())
+        try:
+            self.store.add_subject(name, self.difficulty.currentText())
+        except sqlite3.IntegrityError:
+            QMessageBox.information(self, "과목 추가", f"'{name}' 과목은 이미 등록되어 있습니다.")
+            self.name_input.selectAll()
+            self.name_input.setFocus(Qt.OtherFocusReason)
+            return
         self.name_input.clear()
         self.refresh()
 
